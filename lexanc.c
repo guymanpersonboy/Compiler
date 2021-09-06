@@ -27,93 +27,162 @@
 #include "token.h"
 #include "lexan.h"
 
-/* This file will work as given with an input file consisting only
-   of integers separated by blanks:
-   make lex1
-   lex1
-   12345 123    345  357
-   */
+static const char *reserved[ ] = {
+    "array", "begin", "case", "const", "do",
+    "downto", "else", "end", "file", "for",
+    "function", "goto", "if", "label", "nil",
+    "of", "packed", "procedure", "program",
+    "record", "repeat", "set", "then", "to",
+    "type", "until", "var", "while", "with",
+    "and", "or", "not", "div", "mod", "in"
+};
+static const char *delimiters[] = {
+    ",", ";", ":", "(", ")", "[", "]", ".."
+};
+static const char *operators[] = {
+    "+", "-", "*", "/", ":=", "=", "<>", "<",
+    "<=", ">=", ">", "^", "."
+};
 
-/* Skip blanks and whitespace.  Expand this function to skip comments too. */
+/* Skip blanks, whitespace, and comments */
 void skipblanks () {
     int c;
     // skips blanks and whitespace
     while ((c = peekchar()) != EOF && (c == ' ' || c == '\n' || c == '\t')) {
         getchar();
     }
-    // skips comments
-    if (c == '{' ) {
-        // { and } comments
+    if (c == '{') {
+        getchar();
+        // skips { } comments
         while ((c = peekchar()) != EOF && c != '}') {
             getchar();
         }
         getchar();
-        // TODO call skipblanks again fi more whitespace?
+        skipblanks();
     }
+    // TODO FIX
     if (peekchar() == '(' && peek2char() == '*') {
-        // (* and *) comments
+        // skips (* *) comments
         while ((c = peekchar()) != EOF && (c != '*' && peek2char() != ')')) {
             getchar();
         }
         getchar();
         getchar();
-        // TODO call skipblanks again fi more whitespace?
+        skipblanks();
     }
 }
 
 /* Get identifiers and reserved words */
 TOKEN identifier (TOKEN tok) {
+    const int NUM_RESERVED = 35;
     int c;
     char str[16];
-    while ((c = peekchar()) != EOF && CHARCLASS[c] == ALPHA) {
-        break;
+
+    // assume only the first 15 chars are significant
+    for (int i = 0; i < 15; i++) {
+        // read until non alpha-numeric char
+        if ((c = peekchar()) != EOF &&
+                (CHARCLASS[c] == ALPHA || CHARCLASS[c] == NUMERIC)) {
+            str[i] = getchar();
+        } else {
+            str[i] = '\0';
+            break;
+        }
     }
-    // TODO determine if an identifier or reserved
-    // if (tok == identifier) {}
+    // determine if a reserved word
+    for (int word = 0; word < NUM_RESERVED; word++) {
+        if (strcmp(str, reserved[word]) == 0) {
+            // determine if an operator reserved word
+            const int LOOKUP_BIAS = 245;
+            // 29 <= word <= 34
+            if (AND - LOOKUP_BIAS <= word && word <= IN - LOOKUP_BIAS) {
+                const int OP_BIAS = 15;
+                tok->tokentype = OPERATOR;
+                // whichval AND to IN is 29 - 15 and 34 - 15
+                tok->whichval = word - OP_BIAS;
+
+                return tok;
+            }
+            // else a reserved word
+            tok->tokentype = RESERVED;
+            tok->whichval = word + 1;
+
+            return tok;
+        }
+    }
+    // we now know its an identifier
     tok->tokentype = IDENTIFIERTOK;
     strcpy(tok->stringval, str);
-    // else {}
-    tok->tokentype = RESERVED;
-    // TODO there are some #define in token.h for these, use?
-    tok->whichval = 1.29;
 
     return tok;
 }
 
 /* Get strings */
 TOKEN getstring (TOKEN tok) {    
-    if (peekchar() == '\'') {
-        getchar();
-        int c, i;
+    getchar();
+    int c, i;
 
-        // copy each char between ' and '
-        char str[16];
-        for (i = 0; i < 15; i++) {
-            // read until the final ' 
-            if ((c = peekchar()) != '\'') {
-                str[i] = getchar();
-            } else if (c == '\'' && peek2char() == '\'') {
-                // '' to include a ' in lisp
-                str[i] = getchar();
-                getchar();
-            } else {
-                // peekchar() == ' and peek2char != ' so i++ for \0 and break
-                getchar();
-                i++;
-                break;
-            }
+    // copy each char between ' and '
+    char str[16];
+    for (i = 0; i < 15; i++) {
+        // read until the final ' 
+        if ((c = peekchar()) != '\'') {
+            str[i] = getchar();
+        } else if (c == '\'' && peek2char() == '\'') {
+            // '' to include a ' in lisp
+            str[i] = getchar();
+            getchar();
+        } else {
+            // peekchar() == ' and peek2char != '
+            getchar();
+            break;
         }
-        str[i] = '\0';
-        strcpy(tok->stringval, str);
     }
+    str[i] = '\0';
+    strcpy(tok->stringval, str);
     tok->tokentype = STRINGTOK;
 
     return tok;
 }
 
-/* //??? Get Operators and Delimiters */
+/* // Get Operators and Delimiters */
 TOKEN special (TOKEN tok) {
-    return tok;
+    const int NUM_DELIMITERS = 8;
+    const int NUM_OPERATORS = 19;
+    // TODO FIX OPERATORS AND DELIMITERS (THE PROBLEM MIGHT BE HERE WITH \0 OR THE TABLES)
+    const int c = (peek2char() == ' ') ? '\0' : peek2char();
+    char next_chars[2] = {peekchar(), c};
+    int i;
+
+    // determine if an delimiter or operator
+    for (i = 0; i < NUM_DELIMITERS; i++) {
+        if (next_chars == delimiters[i]) {
+            // a delimiter
+            if (strcmp(next_chars, "..") == 0) {
+                getchar;
+            }
+            getchar();
+            tok->tokentype = DELIMITER;
+            tok->whichval = i + 1;
+
+            return (tok);
+        }
+    }
+    // we check for an operator
+    for (i = 0; i < NUM_OPERATORS; i++) {
+        // check for ops with identical first chars
+        if (strcmp(next_chars, operators[i]) == 0) {
+            if (next_chars[1] != '\0') {
+                getchar();
+            }
+            getchar();
+            tok->tokentype = OPERATOR;
+            tok->whichval = i + 1;
+            break;
+        }
+    }
+
+    return (tok);
 }
 
 /* Get and convert unsigned numbers of all types. */
@@ -131,4 +200,3 @@ TOKEN number (TOKEN tok) {
     tok->intval = num;
     return (tok);
 }
-
