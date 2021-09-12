@@ -22,8 +22,10 @@
 */
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <ctype.h>
 #include <string.h>
+#include <math.h>
 #include "token.h"
 #include "lexan.h"
 
@@ -182,21 +184,74 @@ TOKEN special (TOKEN tok) {
         }
     }
 
-    return (tok);
+    return tok;
 }
 
 /* Get and convert unsigned numbers of all types. */
 TOKEN number (TOKEN tok) {
-    long num;
-    int  c, charval;
-    num = 0;
-    while ((c = peekchar()) != EOF && CHARCLASS[c] == NUMERIC) {
-        c = getchar();
-        charval = (c - '0');
-        num = num * 10 + charval;
-    }
+    bool dec_flag = false;
+    bool sig_fig = false;
+    int exp = 0;
+    long num = 0;
+    int  c, charval, bias;
+
     tok->tokentype = NUMBERTOK;
     tok->basicdt = INTEGER;
-    tok->intval = num;
+    // converts a number to internal numeric form
+    while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC || c == '.')) {
+        c = getchar();
+        if (dec_flag) {
+            // TODO handle 8 sig figs for floats only
+            // TODO must eat up the rest of the digits
+            exp--;
+        }
+        if (c == '.') {
+            // check if actually delimiter ".."
+            if (peekchar() == '.') {
+                getchar();
+                tok->tokentype = DELIMITER;
+                tok->whichval = DOTDOT - DELIMITER_BIAS;
+                return tok;
+            }
+            tok->basicdt = REAL;
+            dec_flag = true;
+            continue;
+        }
+        charval = (c - '0');
+        // check for overflow
+        if (num > __INT_MAX__ / 10 || num == (__INT_MAX__ / 10) && charval > 7) {
+            fprintf(stderr, "error: overflow occured\n");
+            return tok;
+        }
+        num = num * 10 + charval;
+    }
+    // E notation
+    if (c == 'e' || c == 'E') {
+        tok->basicdt = REAL;
+        getchar();
+        
+        // bias on exp
+        if ((c = peekchar()) == '+' || c == '-') {
+            getchar();
+            bias = (c == '+') ? 1 : -1;
+        }
+        // read exp value
+        while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC)) {
+            c = getchar();
+            charval = (c - '0');
+            exp += bias * charval;
+        }
+    }
+    if (tok->basicdt == REAL) {
+        // check for overflow
+        // if (// TODO ) {
+        //     fprintf(stderr, "error: overflow occured\n");
+        //     return tok;
+        // }
+        tok->realval = num * pow(10, exp);
+    } else {
+        tok->intval = num;
+    }
+
     return (tok);
 }
