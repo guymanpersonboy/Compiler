@@ -54,7 +54,6 @@ void skipblanks () {
         getchar();
     }
     if (c == '{') {
-        getchar();
         // skips { } comments
         while ((c = peekchar()) != EOF && c != '}') {
             getchar();
@@ -62,10 +61,11 @@ void skipblanks () {
         getchar();
         skipblanks();
     }
-    // TODO FIX
     if (peekchar() == '(' && peek2char() == '*') {
+        getchar();
+        getchar();
         // skips (* *) comments
-        while ((c = peekchar()) != EOF && (c != '*' && peek2char() != ')')) {
+        while ((c = peekchar()) != EOF && (c != '*' || peek2char() != ')')) {
             getchar();
         }
         getchar();
@@ -94,9 +94,8 @@ TOKEN identifier (TOKEN tok) {
     // determine if a reserved word
     for (int word = 0; word < NUM_RESERVED; word++) {
         if (strcmp(str, reserved[word]) == 0) {
-            // determine if an operator reserved word
             const int LOOKUP_BIAS = 245;
-            // 29 <= word <= 34
+            // check if actually an operator. reserved index: 29 <= word <= 34)
             if (AND - LOOKUP_BIAS <= word && word <= IN - LOOKUP_BIAS) {
                 const int OP_BIAS = 15;
                 tok->tokentype = OPERATOR;
@@ -112,7 +111,7 @@ TOKEN identifier (TOKEN tok) {
             return tok;
         }
     }
-    // we now know its an identifier
+    // an identifier
     tok->tokentype = IDENTIFIERTOK;
     strcpy(tok->stringval, str);
 
@@ -151,35 +150,44 @@ TOKEN getstring (TOKEN tok) {
 TOKEN special (TOKEN tok) {
     const int NUM_DELIMITERS = 8;
     const int NUM_OPERATORS = 19;
-    // TODO FIX OPERATORS AND DELIMITERS (THE PROBLEM MIGHT BE HERE WITH \0 OR THE TABLES)
-    const int c = (peek2char() == ' ') ? '\0' : peek2char();
-    char next_chars[2] = {peekchar(), c};
-    int i;
+    char next_chars[2] = {peekchar(), peek2char()};
+    int c, i;
+
+    // set up next_chars to be read as a string for strcmp()
+    if ((c = peek2char()) == EOF || (c == ' ' || c == '\n' || c == '\t')) {
+        next_chars[1] = '\0';
+    }
 
     // determine if an delimiter or operator
     for (i = 0; i < NUM_DELIMITERS; i++) {
-        if (next_chars == delimiters[i]) {
-            // a delimiter
-            if (strcmp(next_chars, "..") == 0) {
-                getchar;
+        if ((c = peekchar()) != EOF && next_chars[0] == delimiters[i][0] &&
+                next_chars[1] != '=') {
+            // check if actually the DOT operator
+            if (next_chars[0] == '.' && next_chars[1] != '.') {
+                break;
             }
-            getchar();
+            // a delimiter
             tok->tokentype = DELIMITER;
             tok->whichval = i + 1;
+            if (strcmp(next_chars, "..") == 0) {
+                getchar();
+            }
+            getchar();
 
-            return (tok);
+            return tok;
         }
     }
-    // we check for an operator
     for (i = 0; i < NUM_OPERATORS; i++) {
-        // check for ops with identical first chars
-        if (strcmp(next_chars, operators[i]) == 0) {
+        // check for operators with identical chars
+        if ((c = peekchar()) != EOF && next_chars[0] == operators[i][0]
+                && next_chars[1] == operators[i][1]) {
+            // an operator
+            tok->tokentype = OPERATOR;
+            tok->whichval = i + 1;
             if (next_chars[1] != '\0') {
                 getchar();
             }
             getchar();
-            tok->tokentype = OPERATOR;
-            tok->whichval = i + 1;
             break;
         }
     }
