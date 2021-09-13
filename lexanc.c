@@ -29,6 +29,8 @@
 #include "token.h"
 #include "lexan.h"
 
+static bool consume_check_float(TOKEN tok, long num, int exp, bool dec_flag);
+
 static const char *reserved[ ] = {
     "array", "begin", "case", "const", "do",
     "downto", "else", "end", "file", "for",
@@ -160,8 +162,8 @@ TOKEN special (TOKEN tok) {
 
     // determine if an delimiter or operator
     for (i = 0; i < NUM_DELIMITERS; i++) {
-        if ((c = peekchar()) != EOF && next_chars[0] == delimiters[i][0] &&
-                next_chars[1] != '=') {
+        if ((c = peekchar()) != EOF && next_chars[0] == delimiters[i][0]
+                && next_chars[1] != '=') {
             // check if actually the DOT operator
             if (next_chars[0] == '.' && next_chars[1] != '.') {
                 break;
@@ -198,7 +200,9 @@ TOKEN special (TOKEN tok) {
 /* Get and convert unsigned numbers of all types. */
 TOKEN number (TOKEN tok) {
     bool dec_flag = false;
-    bool sig_fig = false;
+    bool overflow_flag = false;
+    bool leading_zeroes = false;
+    int sig_figs = 0;
     int exp = 0;
     long num = 0;
     int  c, charval, bias;
@@ -209,57 +213,122 @@ TOKEN number (TOKEN tok) {
     while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC || c == '.')) {
         c = getchar();
         if (dec_flag) {
-            // TODO handle 8 sig figs for floats only
-            // TODO must eat up the rest of the digits
             exp--;
         }
         if (c == '.') {
             // check if actually delimiter ".."
             if (peekchar() == '.') {
-                getchar();
-                tok->tokentype = DELIMITER;
-                tok->whichval = DOTDOT - DELIMITER_BIAS;
-                return tok;
+                // put one '.' and process number as is
+                ungetc(c, stdin);
+                break;
             }
             tok->basicdt = REAL;
             dec_flag = true;
             continue;
         }
+        // count for 8 sig figs if num will be a float
+        if (c != '0' || sig_figs) {
+            sig_figs++;
+        }
+        // if there was leading zeroes ignore e in float overflow check
+        if (!sig_figs) {
+            leading_zeroes = true;
+        }
+
         charval = (c - '0');
-        // check for overflow
-        if (num > __INT_MAX__ / 10 || num == (__INT_MAX__ / 10) && charval > 7) {
-            fprintf(stderr, "error: overflow occured\n");
-            return tok;
+        // check for INTEGER overflow
+        if (num > __INT_MAX__ / 10 || num == (__INT_MAX__ / 10)
+                && charval > 7) {
+            overflow_flag = consume_check_float(tok, num, exp, dec_flag);
+            if (overflow_flag) {
+                break;
+            }
         }
         num = num * 10 + charval;
+
+        if (dec_flag && sig_figs == 8) {
+            break;
+        }
     }
+
     // E notation
-    if (c == 'e' || c == 'E') {
+    if ((c = peekchar()) == 'e' || c == 'E') {
+        int read_exp = 0;
         tok->basicdt = REAL;
         getchar();
         
         // bias on exp
         if ((c = peekchar()) == '+' || c == '-') {
-            getchar();
+            c = getchar();
             bias = (c == '+') ? 1 : -1;
         }
         // read exp value
         while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC)) {
             c = getchar();
             charval = (c - '0');
-            exp += bias * charval;
+            read_exp = read_exp * 10 + charval;
         }
+        exp += bias * read_exp;
     }
+
+    // set tok->tokenvalue
     if (tok->basicdt == REAL) {
+        const int exp_overflow = 38;
         // check for overflow
-        // if (// TODO ) {
-        //     fprintf(stderr, "error: overflow occured\n");
-        //     return tok;
-        // }
+        // TODO 
+        if (!leading_zeroes && -1 * (exp_overflow) <= exp && exp <= exp_overflow) {
+            overflow_flag = true;
+        }
         tok->realval = num * pow(10, exp);
     } else {
         tok->intval = num;
     }
+    if (overflow_flag) {
+        fprintf(stderr, "Integer number out of range\n");
+        tok->realval = 0;
+    }
 
     return (tok);
+}
+
+// consume the rest of the line and check if the tok is a valid float
+// return true if overflow and false otherwise
+static bool consume_check_float(TOKEN tok, long num, int exp, bool dec_flag) {
+    // overflows at 10 sigs keep only 8
+    num /= 100;
+    bool overflow_flag = false;
+    // we have 8 sig figs and so 1.234567 set up for E notation
+    exp = (dec_flag) ? exp + 2 : 7;
+    int c;
+
+    while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC || c == '.')) {
+        c = getchar();
+        if (c == '.') {
+            // check if actually delimiter ".."
+            if (peekchar() == '.') {
+                // put one '.' and process number as is
+                ungetc(c, stdin);
+
+                return true;
+            }
+            tok->basicdt = REAL;
+            dec_flag = true;
+            continue;
+        }
+        exp += (dec_flag) ? 0 : 1;
+    }
+    if (tok->basicdt == REAL) {
+        const int exp_overflow = 38;
+        // check for REAL overflow
+        if (-1 * (exp_overflow) <= exp && exp <= exp_overflow) {
+            overflow_flag = true;
+        }
+        tok->realval = num * pow(10, exp);
+    }
+    // check found as a valid float
+    if (dec_flag && !overflow_flag) {
+        return false;
+    }
+
+    return true;
 }
