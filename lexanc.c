@@ -287,9 +287,7 @@ TOKEN number (TOKEN tok) {
     // set tok->tokenvalue
     if (tok->basicdt == REAL) {
         tok->realval = num * pow(10, mantissa);
-        fprintf(stderr, "%f\n", tok->realval);
 
-        fprintf(stderr, "exp %d\n", mantissa);
         if (-45 > mantissa || mantissa > 31) {
             printf("Floating number out of range\n");
             tok->realval = 0;
