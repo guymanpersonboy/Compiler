@@ -29,7 +29,7 @@
 #include "token.h"
 #include "lexan.h"
 
-static bool consume_check_float(TOKEN tok, long num, int exp, bool dec_flag);
+static bool consume_check_float(TOKEN tok, long num, int *m, bool dec_flag);
 
 static const char *reserved[ ] = {
     "array", "begin", "case", "const", "do",
@@ -93,6 +93,11 @@ TOKEN identifier (TOKEN tok) {
             break;
         }
     }
+    // consume all other ALPHA and NUMERIC chars
+    while ((c = peekchar()) != EOF &&
+            (CHARCLASS[c] == ALPHA || CHARCLASS[c] == NUMERIC)) {
+        getchar();
+    }
     // determine if a reserved word
     for (int word = 0; word < NUM_RESERVED; word++) {
         if (strcmp(str, reserved[word]) == 0) {
@@ -141,6 +146,14 @@ TOKEN getstring (TOKEN tok) {
             break;
         }
     }
+    // consume all other chars until and including an '
+    while ((c = peekchar()) != EOF &&
+            (c == '\'' || CHARCLASS[c] == ALPHA || CHARCLASS[c] == NUMERIC)) {
+        getchar();
+        if (c == '\'') {
+            break;
+        }
+    }
     str[i] = '\0';
     strcpy(tok->stringval, str);
     tok->tokentype = STRINGTOK;
@@ -148,7 +161,7 @@ TOKEN getstring (TOKEN tok) {
     return tok;
 }
 
-/* // Get Operators and Delimiters */
+/* Get Operators and Delimiters */
 TOKEN special (TOKEN tok) {
     const int NUM_DELIMITERS = 8;
     const int NUM_OPERATORS = 19;
@@ -201,11 +214,10 @@ TOKEN special (TOKEN tok) {
 TOKEN number (TOKEN tok) {
     bool dec_flag = false;
     bool overflow_flag = false;
-    bool leading_zeroes = false;
     int sig_figs = 0;
-    int exp = 0;
+    int mantissa = 0;
     long num = 0;
-    int  c, charval, bias;
+    int  c, charval;
 
     tok->tokentype = NUMBERTOK;
     tok->basicdt = INTEGER;
@@ -213,7 +225,7 @@ TOKEN number (TOKEN tok) {
     while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC || c == '.')) {
         c = getchar();
         if (dec_flag) {
-            exp--;
+            mantissa--;
         }
         if (c == '.') {
             // check if actually delimiter ".."
@@ -230,16 +242,12 @@ TOKEN number (TOKEN tok) {
         if (c != '0' || sig_figs) {
             sig_figs++;
         }
-        // if there was leading zeroes ignore e in float overflow check
-        if (!sig_figs) {
-            leading_zeroes = true;
-        }
 
         charval = (c - '0');
         // check for INTEGER overflow
-        if (num > __INT_MAX__ / 10 || num == (__INT_MAX__ / 10)
-                && charval > 7) {
-            overflow_flag = consume_check_float(tok, num, exp, dec_flag);
+        if (!dec_flag && (num > __INT_MAX__ / 10 || (num == __INT_MAX__ / 10
+                && charval > 7))) {
+            overflow_flag = consume_check_float(tok, num, &mantissa, dec_flag);
             if (overflow_flag) {
                 break;
             }
@@ -247,58 +255,64 @@ TOKEN number (TOKEN tok) {
         num = num * 10 + charval;
 
         if (dec_flag && sig_figs == 8) {
+            // consume all nubmers until reaching 'e' or end of float
+            while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC)) {
+                getchar();
+            }
             break;
         }
     }
 
     // E notation
     if ((c = peekchar()) == 'e' || c == 'E') {
-        int read_exp = 0;
+        int exp = 0;
+        int bias = 1;
         tok->basicdt = REAL;
         getchar();
         
         // bias on exp
         if ((c = peekchar()) == '+' || c == '-') {
             c = getchar();
-            bias = (c == '+') ? 1 : -1;
+            bias = (c == '-') ? -1 : 1;
         }
         // read exp value
         while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC)) {
             c = getchar();
             charval = (c - '0');
-            read_exp = read_exp * 10 + charval;
+            exp = exp * 10 + charval;
         }
-        exp += bias * read_exp;
+        mantissa += bias * exp;
     }
 
     // set tok->tokenvalue
     if (tok->basicdt == REAL) {
-        const int exp_overflow = 38;
-        // check for overflow
-        // TODO 
-        if (!leading_zeroes && -1 * (exp_overflow) <= exp && exp <= exp_overflow) {
-            overflow_flag = true;
+        tok->realval = num * pow(10, mantissa);
+        fprintf(stderr, "%f\n", tok->realval);
+
+        fprintf(stderr, "exp %d\n", mantissa);
+        if (-45 > mantissa || mantissa > 31) {
+            printf("Floating number out of range\n");
+            tok->realval = 0;
         }
-        tok->realval = num * pow(10, exp);
     } else {
         tok->intval = num;
-    }
-    if (overflow_flag) {
-        fprintf(stderr, "Integer number out of range\n");
-        tok->realval = 0;
+
+        if (overflow_flag) {
+            printf("Integer number out of range\n");
+        }
     }
 
     return (tok);
 }
 
-// consume the rest of the line and check if the tok is a valid float
-// return true if overflow and false otherwise
-static bool consume_check_float(TOKEN tok, long num, int exp, bool dec_flag) {
+/* consume the rest of the line and check if the tok is a valid float
+return true if INTEGER overflow and false if a float */
+static bool consume_check_float(TOKEN tok, long num, int *m, bool dec_flag) {
     // overflows at 10 sigs keep only 8
     num /= 100;
     bool overflow_flag = false;
-    // we have 8 sig figs and so 1.234567 set up for E notation
-    exp = (dec_flag) ? exp + 2 : 7;
+    // removed two digits so m + 2 : initialize as 0
+    int mantissa = (dec_flag) ? *m + 2 : 0;
     int c;
 
     while ((c = peekchar()) != EOF && (CHARCLASS[c] == NUMERIC || c == '.')) {
@@ -315,18 +329,11 @@ static bool consume_check_float(TOKEN tok, long num, int exp, bool dec_flag) {
             dec_flag = true;
             continue;
         }
-        exp += (dec_flag) ? 0 : 1;
+        mantissa += (dec_flag) ? 0 : 1;
     }
-    if (tok->basicdt == REAL) {
-        const int exp_overflow = 38;
-        // check for REAL overflow
-        if (-1 * (exp_overflow) <= exp && exp <= exp_overflow) {
-            overflow_flag = true;
-        }
-        tok->realval = num * pow(10, exp);
-    }
-    // check found as a valid float
-    if (dec_flag && !overflow_flag) {
+    *m = mantissa;
+    // return false if a float
+    if (dec_flag) {
         return false;
     }
 
