@@ -1,7 +1,6 @@
 /* lex1.c         14 Feb 01; 31 May 12; 11 Jan 18       */
 
-/* This file contains code stubs for the lexical analyzer.
-   Rename this file to be lexanc.c and fill in the stubs.    */
+/* This file contains code stubs for the lexical analyzer. */
 
 /* Copyright (c) 2018 Gordon S. Novak Jr. and
    The University of Texas at Austin. */

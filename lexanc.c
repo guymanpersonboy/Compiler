@@ -1,7 +1,7 @@
-/* lex1.c         14 Feb 01; 31 May 12; 11 Jan 18       */
+/* lexanc.c         14 Feb 01; 31 May 12; 11 Jan 18       */
 
-/* This file contains code stubs for the lexical analyzer.
-   Rename this file to be lexanc.c and fill in the stubs.    */
+// Christopher Carrasco
+// cc66496
 
 /* Copyright (c) 2018 Gordon S. Novak Jr. and
    The University of Texas at Austin. */
@@ -101,13 +101,13 @@ TOKEN identifier (TOKEN tok) {
     // determine if a reserved word
     for (int word = 0; word < NUM_RESERVED; word++) {
         if (strcmp(str, reserved[word]) == 0) {
-            const int LOOKUP_BIAS = 245;
+            const int lookup_bias = 245;
             // check if actually an operator. reserved index: 29 <= word <= 34)
-            if (AND - LOOKUP_BIAS <= word && word <= IN - LOOKUP_BIAS) {
-                const int OP_BIAS = 15;
+            if (AND - lookup_bias <= word && word <= IN - lookup_bias) {
+                const int op_bias = 15;
                 tok->tokentype = OPERATOR;
                 // whichval AND to IN is 29 - 15 and 34 - 15
-                tok->whichval = word - OP_BIAS;
+                tok->whichval = word - op_bias;
 
                 return tok;
             }
