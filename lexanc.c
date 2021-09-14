@@ -169,7 +169,8 @@ TOKEN special (TOKEN tok) {
     int c, i;
 
     // set up next_chars to be read as a string for strcmp()
-    if ((c = peek2char()) == EOF || (c == ' ' || c == '\n' || c == '\t')) {
+    if ((c = peek2char()) == EOF || (c == ' ' || c == '\n' || c == '\t')
+            || CHARCLASS[c] == ALPHA || CHARCLASS[c] == NUMERIC) {
         next_chars[1] = '\0';
     }
 
