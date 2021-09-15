@@ -165,10 +165,10 @@ TOKEN getstring (TOKEN tok) {
 TOKEN special (TOKEN tok) {
     const int num_delimiters = 8;
     const int num_operators = 13;
-    char next_chars[2] = {peekchar(), peek2char()};
+    char next_chars[3] = {peekchar(), peek2char(), '\0'};
     int c, i;
 
-    // determine if a delimiter or operator
+    // delimiters
     for (i = 0; i < num_delimiters; i++) {
         if ((c = peekchar()) != EOF && next_chars[0] == delimiters[i][0]
                 && next_chars[1] != '=') {
@@ -187,7 +187,7 @@ TOKEN special (TOKEN tok) {
             return tok;
         }
     }
-
+    // operators
     for (i = 0; i < num_operators; i++) {
         // check for 2 char operators
         if ((c = peekchar()) != EOF && strcmp(next_chars, operators[i]) == 0
