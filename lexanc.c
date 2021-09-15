@@ -163,19 +163,13 @@ TOKEN getstring (TOKEN tok) {
 
 /* Get Operators and Delimiters */
 TOKEN special (TOKEN tok) {
-    const int NUM_DELIMITERS = 8;
-    const int NUM_OPERATORS = 19;
+    const int num_delimiters = 8;
+    const int num_operators = 13;
     char next_chars[2] = {peekchar(), peek2char()};
     int c, i;
 
-    // set up next_chars to be read as a string for strcmp()
-    if ((c = peek2char()) == EOF || (c == ' ' || c == '\n' || c == '\t')
-            || CHARCLASS[c] == ALPHA || CHARCLASS[c] == NUMERIC) {
-        next_chars[1] = '\0';
-    }
-
-    // determine if an delimiter or operator
-    for (i = 0; i < NUM_DELIMITERS; i++) {
+    // determine if a delimiter or operator
+    for (i = 0; i < num_delimiters; i++) {
         if ((c = peekchar()) != EOF && next_chars[0] == delimiters[i][0]
                 && next_chars[1] != '=') {
             // check if actually the DOT operator
@@ -193,17 +187,30 @@ TOKEN special (TOKEN tok) {
             return tok;
         }
     }
-    for (i = 0; i < NUM_OPERATORS; i++) {
-        // check for operators with identical chars
-        if ((c = peekchar()) != EOF && next_chars[0] == operators[i][0]
-                && next_chars[1] == operators[i][1]) {
+
+    for (i = 0; i < num_operators; i++) {
+        // check for 2 char operators
+        if ((c = peekchar()) != EOF && strcmp(next_chars, operators[i]) == 0
+                && CHARCLASS[next_chars[1]] == SPECIAL) {
             // an operator
             tok->tokentype = OPERATOR;
             tok->whichval = i + 1;
-            if (next_chars[1] != '\0') {
-                getchar();
-            }
             getchar();
+            getchar();
+
+            return tok;
+        }
+    }
+    // null terminate in case peek2char() is also a 1 char operator
+    next_chars[1] = '\0';
+    for (i = 0; i < num_operators; i++) {
+        // check for 1 char operator
+        if ((c = peekchar()) != EOF && strcmp(next_chars, operators[i]) == 0) {
+            // an operator
+            tok->tokentype = OPERATOR;
+            tok->whichval = i + 1;
+            getchar();
+
             break;
         }
     }
