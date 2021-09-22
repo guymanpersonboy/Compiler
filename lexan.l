@@ -100,7 +100,7 @@ mod       {return(maketoken(OPERATOR, MOD));}
 in        {return(maketoken(OPERATOR, IN));}
 
 {id}      {return(install_id());}
-{string}  {return(install_string());}
+"'"       {return(install_string());}
 {intnum}  {return(install_intnum());}
 {fnumber} {return(install_fnum());}
 
@@ -158,8 +158,8 @@ int maketoken(int type, int which)
   return(which);
   }
 
-int install_id()
- { int i, c, n;
+int install_id() {
+  int i, c, n;
   yylval = talloc();  /* Make new token, set yylval to point to it */
   yylval->tokentype = IDENTIFIERTOK;
   n = yyleng;            /* number of characters */
@@ -175,18 +175,37 @@ int install_id()
  }
 
 int install_string() {
-  int i, c, n;
-  yylval = talloc();   /* Make new token, set yylval to point to it */
+  int c, d, i;
+  yylval = talloc();  /* Make new token, set yylval to point to it */
   yylval->tokentype = STRINGTOK;
-  n = yyleng;            /* number of characters */
-  if ( n > 17 ) n = 17;
-  for (i = 1; i < n ; i++)
-   { c = yytext[i];
-     yylval->stringval[i-1] = c;
-     if (c == '\'' && yytext[i+1] == '\'') i++;
-    };
-  yylval->stringval[n-2] = '\0';
-          /* printf("id  %10s   n = %4d\n", yytext, n); */
+  char str[16];
+  for (i = 0; i < 15; i++) {
+     /* read until the final ' */
+     if ((c = input()) != '\'') {
+        str[i] = c;
+     } else if (c == '\'' && (d = input()) == '\'') {
+        /* '' to include a ' in lisp */
+        str[i] = d;
+     } else {
+        /* c == ' and d != ' */
+        unput(d);
+        str[i] = '\0';
+        strcpy(yylval->stringval, str);
+        return(STRING);
+     }
+  }
+  /* consume all other chars until and including an ' */
+  while ((c = input()) != EOF && (c == '\'' || (c >= 'A' && c <= 'Z')
+      || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+     if (c == '\'') {
+        str[i] = '\0';
+        strcpy(yylval->stringval, str);
+        return(STRING);
+     }
+  }
+  unput(c);
+  str[i] = '\0';
+  strcpy(yylval->stringval, str);
   return(STRING);
  }
 
