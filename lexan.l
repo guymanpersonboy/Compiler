@@ -76,7 +76,7 @@ function  {return(maketoken(RESERVED, FUNCTION));}
 goto      {return(maketoken(RESERVED, GOTO));}
 if        {return(maketoken(RESERVED, IF));}
 label     {return(maketoken(RESERVED, LABEL));}
-nil      {return(maketoken(RESERVED, NIL));}
+nil       {return(maketoken(RESERVED, NIL));}
 of        {return(maketoken(RESERVED, OF));}
 packed    {return(maketoken(RESERVED, PACKED));}
 procedure {return(maketoken(RESERVED, PROCEDURE));}
