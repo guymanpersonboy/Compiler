@@ -133,7 +133,7 @@ TOKEN getstring (TOKEN tok) {
     // copy each char between ' and '
     char str[16];
     for (i = 0; i < 15; i++) {
-        // read until the final ' 
+        // read until the final '
         if ((c = peekchar()) != '\'') {
             str[i] = getchar();
         } else if (c == '\'' && peek2char() == '\'') {
