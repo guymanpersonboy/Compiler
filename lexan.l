@@ -54,7 +54,7 @@ ws       {delim}+
 letter   [A-Za-z]
 digit    [0-9]
 id       {letter}({letter}|{digit})*
-string   '[^'\n]*'
+string   '([^'\n]|'')+'
 intnum   {digit}+
 fnumber  {digit}+(\.{digit}+)?([eE][+\-]?{digit}+)?
 
@@ -76,7 +76,7 @@ function  {return(maketoken(RESERVED, FUNCTION));}
 goto      {return(maketoken(RESERVED, GOTO));}
 if        {return(maketoken(RESERVED, IF));}
 label     {return(maketoken(RESERVED, LABEL));}
-nill      {return(maketoken(RESERVED, NIL));}
+nil      {return(maketoken(RESERVED, NIL));}
 of        {return(maketoken(RESERVED, OF));}
 packed    {return(maketoken(RESERVED, PACKED));}
 procedure {return(maketoken(RESERVED, PROCEDURE));}
@@ -100,7 +100,7 @@ mod       {return(maketoken(OPERATOR, MOD));}
 in        {return(maketoken(OPERATOR, IN));}
 
 {id}      {return(install_id());}
-"'"       {return(install_string());}
+{string}  {return(install_string());}
 {intnum}  {return(install_intnum());}
 {fnumber} {return(install_fnum());}
 
@@ -175,37 +175,21 @@ int install_id() {
  }
 
 int install_string() {
-  int c, d, i;
+  int i, c, n;
+  int apos = 1;  /* bias for number of ' skipped */
   yylval = talloc();  /* Make new token, set yylval to point to it */
   yylval->tokentype = STRINGTOK;
-  char str[16];
-  for (i = 0; i < 15; i++) {
-     /* read until the final ' */
-     if ((c = input()) != '\'') {
-        str[i] = c;
-     } else if (c == '\'' && (d = input()) == '\'') {
-        /* '' to include a ' in lisp */
-        str[i] = d;
-     } else {
-        /* c == ' and d != ' */
-        unput(d);
-        str[i] = '\0';
-        strcpy(yylval->stringval, str);
-        return(STRING);
+  n = yyleng;            /* number of characters */
+  if ( n > 17 ) n = 17;  /* 15 + 2 apostrophes */
+  for (i = 1; i < n ; i++)
+   { c = yytext[i];
+     if (c == '\'' && yytext[i+1] == '\'') {
+        i++;
+        apos++;
      }
-  }
-  /* consume all other chars until and including an ' */
-  while ((c = input()) != EOF && (c == '\'' || (c >= 'A' && c <= 'Z')
-      || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
-     if (c == '\'') {
-        str[i] = '\0';
-        strcpy(yylval->stringval, str);
-        return(STRING);
-     }
-  }
-  unput(c);
-  str[i] = '\0';
-  strcpy(yylval->stringval, str);
+     yylval->stringval[i-apos] = c;
+    };
+  yylval->stringval[n-apos-1] = '\0';
   return(STRING);
  }
 
