@@ -82,9 +82,9 @@ tdef_list : ( tdef SEMICOLON )*
 tblock : TYPE tdef_list vblock
        | vblock
 
-vdef : id_list COLON type
+vdef : id_list COLON type /* vargroup */
 
-vdef_list : ( vdef SEMICOLON )*
+vdef_list : ( vdef SEMICOLON )* /* varspecs */
 
 vblock : VAR vdef_list block
        | block
@@ -98,7 +98,7 @@ label : NUMBER COLON statement
 
 statement : BEGINBEGIN statement endpart
           | IF expression THEN statement ( ELSE statement )?
-          | variable ASSIGN expression
+          | variable ASSIGN expression /* assignment */
           | funcall
           | WHILE expression DO statement
           | REPEAT statement_list UNTIL expression

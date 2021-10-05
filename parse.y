@@ -63,52 +63,127 @@ TOKEN parseresult;
 
 %%
 
-program    :  statement DOT                    { parseresult = $1; }
-           |  vblock
-             ;
-  statement  :  BEGINBEGIN statement endpart
-                    { $$ = makeprogn($1,cons($2, $3)); }
-             |  IF expr THEN statement endif   { $$ = makeif($1, $2, $4, $5); }
-             |  assignment
-             ;
-  endpart    :  SEMICOLON statement endpart    { $$ = cons($2, $3); }
-             |  END                            { $$ = NULL; }
-             ;
-  endif      :  ELSE statement                 { $$ = $2; }
-             |  /* empty */                    { $$ = NULL; }
-             ;
-  assignment :  variable ASSIGN expr           { $$ = binop($2, $1, $3); }
-             ;
-  expr       :  expr PLUS term                 { $$ = binop($2, $1, $3); }
-             |  term 
-             ;
-  term       :  term TIMES factor              { $$ = binop($2, $1, $3); }
-             |  factor
-             ;
-  factor     :  LPAREN expr RPAREN             { $$ = $2; }
-             |  variable
-             |  NUMBER
-             ;
-  variable   :  IDENTIFIER                     { $$ = findid($1); }
-             ;
-  idlist     :  IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
-             |  IDENTIFIER                     { $$ = cons($1, NULL); }
-             ;
-  vblock     :  VAR varspecs block             { $$ = $3; }
-             |  block
-             ;
-  varspecs   :  vargroup SEMICOLON varspecs
-             |  vargroup SEMICOLON
-             ;
-  vargroup   :  idlist COLON type              { instvars($1, $3); }
-             ;
-  type       :  simpletype
-             ;  /* ... */
-  simpletype :  IDENTIFIER                     { $$ = findtype($1); }
-             ;  /* ... $1->symtype returns type */
-  block      :  BEGINBEGIN statement endpart
-                    { $$ = makeprogn($1, cons($2, $3)); }
-             ;
+program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
+                      { parseresult = $1; }
+                ;
+lblock          : LABEL numlist SEMICOLON cblock
+                | cblock
+                ;
+numlist         : NUMBER COMMA numlist
+                | NUMBER
+                ;
+cblock          : CONST cdef_list tblock
+                | tblock
+                ;
+cdef_list       : cdef SEMICOLON cdef_list
+                | cdef SEMICOLON
+                ;
+cdef            : IDENTIFIER EQ constant
+                ;
+constant    /*  : sign? IDENTIFIER
+                | sign? NUMBER  */
+                : STRING  /* change : back to | later */
+                ;
+tblock          : TYPE tdef_list vblock
+                | vblock
+                ;
+tdef_list       : tdef SEMICOLON tdef_list
+                | tdef SEMICOLON
+                ;
+tdef            : IDENTIFIER EQ type
+                ;
+vblock          : VAR varspecs block             { $$ = $3; }
+                | block
+                ;
+varspecs        : vargroup SEMICOLON varspecs
+                | vargroup SEMICOLON
+                ;
+vargroup        : idlist COLON type              { instvars($1, $3); }
+                ;
+type            : simpletype
+            /*  | ARRAY LBRACKET simpletype_list RBRACKET OF type
+                | RECORD field_list END
+                | POINT IDENTIFIER  */
+                ;
+simpletype      : IDENTIFIER                     { $$ = findtype($1); }
+                | LPAREN idlist RPAREN
+                | constant DOTDOT constant
+                ; /* $1->symtype returns type */
+simpletype_list : simpletype COMMA simpletype_list
+                | simpletype
+                ;
+block           : BEGINBEGIN statement endpart
+                      { $$ = makeprogn($1, cons($2, $3)); }
+                ;
+statement       : BEGINBEGIN statement endpart
+                          { $$ = makeprogn($1,cons($2, $3)); }
+                | IF expression THEN statement endif
+                          { $$ = makeif($1, $2, $4, $5); }
+                | variable ASSIGN expression /* assignment */
+                          { $$ = binop($2, $1, $3); }
+                | funcall
+                | WHILE expression DO statement
+                | REPEAT statement_list UNTIL expression
+                | FOR IDENTIFIER ASSIGN expression TO expression DO statement
+                          { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
+                | GOTO NUMBER
+                | label
+                ;
+statement_list  : statement SEMICOLON statement_list
+                | statement
+                ;
+label           : NUMBER COLON statement
+                ;
+endpart         : SEMICOLON statement endpart    { $$ = cons($2, $3); }
+                | END                            { $$ = NULL; }
+                ;
+endif           : ELSE statement                 { $$ = $2; }
+                | /* empty */                    { $$ = NULL; }
+                ;
+expression      : expression compare_op expr
+                | expr
+                ;
+compare_op      : EQ | LT | GT| NE | GE | IN
+                ;
+expr            : expr plus_op term                 { $$ = binop($2, $1, $3); }
+                | /* sign? */ term
+                ;
+plus_op         : PLUS | MINUS | OR
+                ;
+term            : term times_op factor              { $$ = binop($2, $1, $3); }
+                | factor
+                ;
+times_op        : TIMES | DIVIDE | DIV | MOD | AND
+                ;
+factor          : unsigned_constant
+                | variable
+                | funcall
+                | LPAREN expr RPAREN          { $$ = $2; }
+                | NOT factor
+                ;
+unsigned_constant : NUMBER | NIL | STRING
+                ;
+variable        : IDENTIFIER                     { $$ = findid($1); }
+                | variable LBRACKET expr_list RBRACKET
+                | variable DOT IDENTIFIER
+                | variable POINT
+                ;
+funcall         : IDENTIFIER LPAREN expr_list RPAREN
+                ;
+expr_list       : expression COMMA expr_list
+                | expression
+                ;
+field_list      : fields SEMICOLON field_list
+                | fields
+                ;
+fields          : idlist COLON type
+                ;
+idlist          : IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
+                | IDENTIFIER                     { $$ = cons($1, NULL); }
+                ;
+sign            : PLUS | MINUS
+                ;
+
 %%
 
 /* You should add your own debugging flags below, and add debugging
@@ -118,15 +193,16 @@ program    :  statement DOT                    { parseresult = $1; }
    are working.
   */
 
-#define DEBUG         0             /* set bits here for debugging, 0 = off  */
-#define DB_CONS       1             /* bit to trace cons */
-#define DB_BINOP      2             /* bit to trace binop */
-#define DB_MAKEIF     3             /* bit to trace makeif */
-#define DB_MAKEPROGN  4             /* bit to trace makeprogn */
-#define DB_FINDID     5             /* bit to trace findid */
-#define DB_FINDTYPE   6             /* bit to trace findtype */
-#define DB_INSTVARS   7             /* bit to trace instvars */
-#define DB_PARSERES   8             /* bit to trace parseresult */
+#define DEBUG          0             /* set bits here for debugging, 0 = off  */
+#define DB_CONS        1             /* bit to trace cons */
+#define DB_BINOP       1             /* bit to trace binop */
+#define DB_MAKEIF      2             /* bit to trace makeif */
+#define DB_MAKEPROGN   2             /* bit to trace makeprogn */
+#define DB_MAKEFOR     4
+#define DB_FINDID      4             /* bit to trace findid */
+#define DB_FINDTYPE    8             /* bit to trace findtype */
+#define DB_INSTVARS    8             /* bit to trace instvars */
+#define DB_PARSERES   16            /* bit to trace parseresult */
 
  int labelnumber = 0;  /* sequential counter for internal label numbers */
 
@@ -192,6 +268,32 @@ TOKEN makeprogn(TOKEN tok, TOKEN statements)
      return tok;
    }
 
+/* makefor makes structures for a for statement.
+   sign is 1 for normal loop, -1 for downto.
+   asg is an assignment statement, e.g. (:= i 1)
+   endexpr is the end expression
+   tok, tokb and tokc are (now) unused tokens that are recycled. */
+TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
+              TOKEN tokc, TOKEN statement)
+  {  if (sign > 0)
+        {
+          makeprogn(tok, asg);
+        } /* else // downto
+        {
+        } */
+     if (DEBUG & DB_MAKEFOR)
+        { printf("makefor\n");
+          dbugprinttok(tok);
+          dbugprinttok(asg);
+          dbugprinttok(tokb);
+          dbugprinttok(tok);
+          dbugprinttok(endexpr);
+          dbugprinttok(tokc);
+          dbugprinttok(statement);
+        };
+     return tok;
+  }
+
 /* findid finds an identifier in the symbol table, sets up symbol table
    pointers, changes a constant to its number equivalent */
 TOKEN findid(TOKEN tok) /* the ID token */
@@ -200,14 +302,12 @@ TOKEN findid(TOKEN tok) /* the ID token */
      SYMBOL typ = sym->datatype;
      tok->symtype = typ;
      if (typ->kind == BASICTYPE ||
-         typ->kind == POINTERSYM)
-       {
-         tok->basicdt = typ->basicdt;
-       };
+            typ->kind == POINTERSYM)
+        { tok->basicdt = typ->basicdt; };
      if (DEBUG & DB_FINDID)
-       { printf("instvars\n");
-         dbugprinttok(tok);
-       };
+        { printf("instvars\n");
+          dbugprinttok(tok);
+        };
      return tok;
   }
 
@@ -217,9 +317,9 @@ TOKEN findtype(TOKEN tok)
   {  SYMBOL sym = searchst(tok->stringval);
      tok->symtype = sym->datatype;
      if (DEBUG & DB_FINDTYPE)
-       { printf("findtype\n");
-         dbugprinttok(tok);
-       };
+        { printf("findtype\n");
+          dbugprinttok(tok);
+        };
      return tok;
   }
 
@@ -232,13 +332,26 @@ int   wordaddress(int n, int wordsize)
 /* instvars will install variables in symbol table.
    typetok is a token containing symbol table pointer for type. */
 void  instvars(TOKEN idlist, TOKEN typetok)
-  {  SYMBOL sym = insertsym(idlist->stringval);
-     sym->datatype = typetok->symtype;
+  {  SYMBOL sym;
+     SYMBOL typesym = typetok->symtype;
+     int align = alignsize(typesym);
+     while (idlist != NULL) /* for each id */
+        { sym = insertsym(idlist->stringval);
+          sym->kind = VARSYM;
+          sym->offset = /* "next" */
+              wordaddress(blockoffs[blocknumber], align);
+          sym->size = typesym->size;
+          blockoffs[blocknumber] = /* "next" */
+              sym->offset + sym->size;
+          sym->datatype = typesym;
+          sym->basicdt = typesym->basicdt;
+          idlist = idlist->link;
+        };
      if (DEBUG & DB_INSTVARS)
-       { printf("instvars\n");
-         dbugprinttok(idlist);
-         dbugprinttok(typetok);
-       };
+        { printf("instvars\n");
+          dbugprinttok(idlist);
+          dbugprinttok(typetok);
+        };
   }
 
 void yyerror (char const *s)
