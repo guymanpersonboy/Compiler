@@ -101,9 +101,9 @@ varspecs        : vargroup SEMICOLON varspecs
 vargroup        : idlist COLON type              { instvars($1, $3); }
                 ;
 type            : simpletype
-            /*  | ARRAY LBRACKET simpletype_list RBRACKET OF type
+                | ARRAY LBRACKET simpletype_list RBRACKET OF type
                 | RECORD field_list END
-                | POINT IDENTIFIER  */
+                | POINT IDENTIFIER
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
                 | LPAREN idlist RPAREN
@@ -125,7 +125,8 @@ statement       : BEGINBEGIN statement endpart
                 | WHILE expression DO statement
                 | REPEAT statement_list UNTIL expression
                 | FOR IDENTIFIER ASSIGN expression TO expression DO statement
-                          { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
+                          /* TODO change sign v to idk */
+                          { $$ = makefor(1, $2, $4, $5, $6, $7, $8);}
                 | GOTO NUMBER
                 | label
                 ;
@@ -145,20 +146,22 @@ expression      : expression compare_op expr
                 ;
 compare_op      : EQ | LT | GT| NE | GE | IN
                 ;
-expr            : expr plus_op term                 { $$ = binop($2, $1, $3); }
+expr            : /* sign? v also change to plus_op */ term
+                | expr PLUS term                 { $$ = binop($2, $1, $3); }
                 | /* sign? */ term
                 ;
 plus_op         : PLUS | MINUS | OR
                 ;
-term            : term times_op factor              { $$ = binop($2, $1, $3); }
-                | factor
+term            : term TIMES factor              { $$ = binop($2, $1, $3); }
+                | factor /* TODO change TIMES to times_op */
                 ;
 times_op        : TIMES | DIVIDE | DIV | MOD | AND
                 ;
 factor          : unsigned_constant
                 | variable
                 | funcall
-                | LPAREN expr RPAREN          { $$ = $2; }
+                | LPAREN expression RPAREN          { $$ = $2; }
+                | NUMBER
                 | NOT factor
                 ;
 unsigned_constant : NUMBER | NIL | STRING
@@ -235,6 +238,36 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
     return op;
   }
 
+/* makeop makes a new operator token with operator number opnum.
+   Example:  makeop(FLOATOP)  */
+TOKEN makeop(int opnum)
+  { TOKEN tok = (TOKEN) talloc();   /* = new token */
+    tok->tokentype = OPERATOR;
+    tok->whichval = opnum;
+    return tok;
+  }
+
+/* makeintc makes a new integer number token with num as its value */
+TOKEN makeintc(int num)
+  { TOKEN tok = (TOKEN) talloc();
+    tok->tokentype = INTEGER;
+    tok->intval = num;
+    return tok;
+  }
+
+/* copytok makes a new token that is a copy of origtok */
+TOKEN copytok(TOKEN origtok)
+  { TOKEN tok = (TOKEN) talloc();   /* = new token */
+    tok->tokentype = origtok->tokentype;
+    tok->basicdt = origtok->basicdt;
+    tok->symtype = origtok->symtype;
+    tok->symentry = origtok->symtype;
+    tok->operands = origtok->operands;
+    tok->link = origtok->link;
+    tok->tokenval = origtok->tokenval;
+    return tok;
+  }
+
 /* makeif makes an IF operator and links it to its arguments.
    tok is a (now) unused token that is recycled to become an IFOP operator */
 TOKEN makeif(TOKEN tok, TOKEN exp, TOKEN thenpart, TOKEN elsepart)
@@ -268,6 +301,15 @@ TOKEN makeprogn(TOKEN tok, TOKEN statements)
      return tok;
    }
 
+/* makelabel makes a new label, using labelnumber++ */
+TOKEN makelabel()
+  { TOKEN tok = (TOKEN) talloc();
+    tok->tokentype = RESERVED;
+    tok->whichval = LABELOP;
+    /* TODO use labelnumber++ */
+    return tok;
+  }
+
 /* makefor makes structures for a for statement.
    sign is 1 for normal loop, -1 for downto.
    asg is an assignment statement, e.g. (:= i 1)
@@ -275,23 +317,31 @@ TOKEN makeprogn(TOKEN tok, TOKEN statements)
    tok, tokb and tokc are (now) unused tokens that are recycled. */
 TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
               TOKEN tokc, TOKEN statement)
-  {  if (sign > 0)
-        {
-          makeprogn(tok, asg);
-        } /* else // downto
-        {
-        } */
-     if (DEBUG & DB_MAKEFOR)
-        { printf("makefor\n");
+  {  if (DEBUG & DB_MAKEFOR)
+        { printf("\nmakefor\n");
           dbugprinttok(tok);
           dbugprinttok(asg);
           dbugprinttok(tokb);
-          dbugprinttok(tok);
           dbugprinttok(endexpr);
           dbugprinttok(tokc);
           dbugprinttok(statement);
         };
-     return tok;
+     if (sign > 0)
+        { TOKEN tokas = makeop(ASSIGNOP);
+          /* build the tokas binop as (:= i start) */
+          binop(tokas, findid(tok), asg);
+          tokc = makeprogn(((TOKEN) talloc()), tokas);
+          TOKEN toklabel = makelabel();
+          tokas->link = toklabel;
+          toklabel->operands = asg;
+          toklabel->link = tokb;
+          /* build if statement, tokb becomes if */
+          TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
+          makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
+        } /* else // downto
+        {
+        } */
+     return tokc;
   }
 
 /* findid finds an identifier in the symbol table, sets up symbol table
@@ -315,7 +365,7 @@ TOKEN findid(TOKEN tok) /* the ID token */
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
   {  SYMBOL sym = searchst(tok->stringval);
-     tok->symtype = sym->datatype;
+     tok->symtype = sym;
      if (DEBUG & DB_FINDTYPE)
         { printf("findtype\n");
           dbugprinttok(tok);
@@ -332,9 +382,14 @@ int   wordaddress(int n, int wordsize)
 /* instvars will install variables in symbol table.
    typetok is a token containing symbol table pointer for type. */
 void  instvars(TOKEN idlist, TOKEN typetok)
-  {  SYMBOL sym;
+  {  if (DEBUG & DB_INSTVARS)
+        { printf("instvars\n");
+          dbugprinttok(idlist);
+          dbugprinttok(typetok);
+        };
      SYMBOL typesym = typetok->symtype;
      int align = alignsize(typesym);
+     SYMBOL sym;
      while (idlist != NULL) /* for each id */
         { sym = insertsym(idlist->stringval);
           sym->kind = VARSYM;
@@ -346,11 +401,6 @@ void  instvars(TOKEN idlist, TOKEN typetok)
           sym->datatype = typesym;
           sym->basicdt = typesym->basicdt;
           idlist = idlist->link;
-        };
-     if (DEBUG & DB_INSTVARS)
-        { printf("instvars\n");
-          dbugprinttok(idlist);
-          dbugprinttok(typetok);
         };
   }
 
