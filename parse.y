@@ -64,7 +64,7 @@ TOKEN parseresult;
 %%
 
 program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
-                      { parseresult = $1; }
+                      { parseresult = makeprogram($2, $4, $7); }
                 ;
 lblock          : LABEL numlist SEMICOLON cblock
                 | cblock
@@ -126,7 +126,7 @@ statement       : BEGINBEGIN statement endpart
                 | REPEAT statement_list UNTIL expression
                 | FOR IDENTIFIER ASSIGN expression TO expression DO statement
                           /* (int sign, tok, asg, tokb, endexpr, tokc, statement) */
-                          { $$ = makefor(1, $1, $2, $5, $6, $7, $8);}
+                          { $$ = makefor(1, $2, $4, $5, $6, $7, $8);}
                 | GOTO NUMBER
                 | label
                 ;
@@ -196,16 +196,17 @@ sign            : PLUS | MINUS
    are working.
   */
 
-#define DEBUG          0             /* set bits here for debugging, 0 = off  */
-#define DB_CONS        1             /* bit to trace cons */
-#define DB_BINOP       1             /* bit to trace binop */
-#define DB_MAKEIF      2             /* bit to trace makeif */
-#define DB_MAKEPROGN   2             /* bit to trace makeprogn */
-#define DB_MAKEFOR     4
-#define DB_FINDID      4             /* bit to trace findid */
-#define DB_FINDTYPE    8             /* bit to trace findtype */
-#define DB_INSTVARS    8             /* bit to trace instvars */
-#define DB_PARSERES   16            /* bit to trace parseresult */
+#define DEBUG          0           /* set bits here for debugging, 0 = off  */
+#define DB_CONS        1           /* bit to trace cons */
+#define DB_BINOP       1           /* bit to trace binop */
+#define DB_MAKEIF      2           /* bit to trace makeif */
+#define DB_MAKEPROGN   2           /* bit to trace makeprogn */
+#define DB_MAKEPROGRAM 4           /* bit to trace makeprogram */
+#define DB_MAKEFOR     4           /* bit to trace makefor */
+#define DB_FINDID      8           /* bit to trace findid */
+#define DB_FINDTYPE    8           /* bit to trace findtype */
+#define DB_INSTVARS   16           /* bit to trace instvars */
+#define DB_PARSERES   16           /* bit to trace parseresult */
 
  int labelnumber = 0;  /* sequential counter for internal label numbers */
 
@@ -306,8 +307,61 @@ TOKEN makelabel()
   { TOKEN tok = (TOKEN) talloc();
     tok->tokentype = RESERVED;
     tok->whichval = LABELOP;
-    /* TODO use labelnumber++ */
+    tok->operands = makeintc(labelnumber++);
     return tok;
+  }
+
+/* dolabel is the action for a label of the form   <number>: <statement>
+   tok is a (now) unused token that is recycled. */
+TOKEN dolabel(TOKEN labeltok, TOKEN tok, TOKEN statement)
+  {
+
+  }
+
+/* instlabel installs a user label into the label table */
+void  instlabel (TOKEN num)
+  {
+
+  }
+
+/* makegoto makes a GOTO operator to go to the specified label.
+   The label number is put into a number token. */
+TOKEN makegoto(int label)
+  {
+
+  }
+
+/* dogoto is the action for a goto statement.
+   tok is a (now) unused token that is recycled. */
+TOKEN dogoto(TOKEN tok, TOKEN labeltok)
+  {
+
+  }
+
+/* makefuncall makes a FUNCALL operator and links it to the fn and args.
+   tok is a (now) unused token that is recycled. */
+TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
+  {
+
+  }
+
+/* makeprogram makes the tree structures for the top-level program */
+TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
+  {  TOKEN tokprogram = (TOKEN) talloc();
+     tokprogram->tokentype = OPERATOR;
+     tokprogram->whichval = PROGRAMOP;
+     tokprogram->operands = name;
+     TOKEN tokprogn = (TOKEN) talloc();
+     name->link = makeprogn(tokprogn, args);
+     tokprogn->link = makeprogn(((TOKEN) talloc()), statements);
+     if (DEBUG & DB_MAKEPROGRAM)
+        { printf("\nmakeprogram\n");
+          dbugprinttok(tokprogram);
+          dbugprinttok(name);
+          dbugprinttok(args);
+          dbugprinttok(statements);
+        }
+    return tokprogram;
   }
 
 /* makefor makes structures for a for statement.
@@ -328,17 +382,16 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
         };
      if (sign > 0)
         { TOKEN tokas = makeop(ASSIGNOP);
-          /* change to using findid(asg) to keep using the same "i" */
-
           /* build the tokas binop as (:= i start) */
           binop(tokas, findid(tok), asg);
           tokc = makeprogn(((TOKEN) talloc()), tokas);
           TOKEN toklabel = makelabel();
           tokas->link = toklabel;
-          toklabel->operands = asg;
+          /* tokb becomes if statement with goto */
           toklabel->link = tokb;
-          /* build if statement, tokb becomes if */
+          /* build if statement */
           TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
+          /* tokc becomes progn containing thenpart and i++ and goto */
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
         } /* else
         { // TODO change sign in function call and implement downto
