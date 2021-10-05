@@ -125,8 +125,8 @@ statement       : BEGINBEGIN statement endpart
                 | WHILE expression DO statement
                 | REPEAT statement_list UNTIL expression
                 | FOR IDENTIFIER ASSIGN expression TO expression DO statement
-                          /* TODO change sign v to idk */
-                          { $$ = makefor(1, $2, $4, $5, $6, $7, $8);}
+                          /* (int sign, tok, asg, tokb, endexpr, tokc, statement) */
+                          { $$ = makefor(1, $1, $2, $5, $6, $7, $8);}
                 | GOTO NUMBER
                 | label
                 ;
@@ -328,6 +328,8 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
         };
      if (sign > 0)
         { TOKEN tokas = makeop(ASSIGNOP);
+          /* change to using findid(asg) to keep using the same "i" */
+
           /* build the tokas binop as (:= i start) */
           binop(tokas, findid(tok), asg);
           tokc = makeprogn(((TOKEN) talloc()), tokas);
@@ -338,8 +340,8 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           /* build if statement, tokb becomes if */
           TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
-        } /* else // downto
-        {
+        } /* else
+        { // TODO change sign in function call and implement downto
         } */
      return tokc;
   }
