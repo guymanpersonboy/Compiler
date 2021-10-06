@@ -206,7 +206,7 @@ sign            : PLUS | MINUS
 #define DB_FINDID      8           /* bit to trace findid */
 #define DB_FINDTYPE    8           /* bit to trace findtype */
 #define DB_INSTVARS   16           /* bit to trace instvars */
-#define DB_PARSERES   16           /* bit to trace parseresult */
+#define DB_PARSERES  128           /* bit to trace parseresult */
 
  int labelnumber = 0;  /* sequential counter for internal label numbers */
 
@@ -314,7 +314,7 @@ TOKEN makelabel()
    tok is a (now) unused token that is recycled. */
 TOKEN dolabel(TOKEN labeltok, TOKEN tok, TOKEN statement)
   {
-
+     return NULL;
   }
 
 /* instlabel installs a user label into the label table */
@@ -335,7 +335,7 @@ TOKEN makegoto(int label)
    tok is a (now) unused token that is recycled. */
 TOKEN dogoto(TOKEN tok, TOKEN labeltok)
   {
-
+     return NULL;
   }
 
 /* makefuncall makes a FUNCALL operator and links it to the fn and args.
@@ -381,14 +381,16 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           makeprogn(tokprogn, tokas);
           /* build the tokas binop as (:= i start) */
           binop(tokas, findid(tok), asg);
+          TOKEN tok1 = copytok(tok);
+          TOKEN tok2 = copytok(tok);
           TOKEN toklabel = makelabel();
           tokas->link = toklabel;
           /* tokb becomes if statement with goto */
           toklabel->link = tokb;
-          TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
+          TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
           /* tokc becomes progn containing thenpart and i++ and goto */
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
-          statement->link = makeplus(tok, makeintc(1), makeop(PLUSOP));
+          statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
           statement->link->link = makegoto(labelnumber - 1);
         } /* else
         { // TODO change sign in function call and implement downto
@@ -472,10 +474,11 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
      tok->tokentype = OPERATOR;
      tok->whichval = PLUSOP;
      TOKEN tokas = makeop(ASSIGNOP);
+     TOKEN tok1 = copytok(lhs);
      tokas->operands = lhs;
      lhs->link = tok;
-     tok->operands = lhs;
-     lhs->link = rhs;
+     tok->operands = tok1;
+     tok1->link = rhs;
      return tokas;
   }
 

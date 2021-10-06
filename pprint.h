@@ -28,3 +28,7 @@ void pplist(TOKEN tok);
 void dbugplist(TOKEN tok);
 void dbugbprinttok(TOKEN tok);
 void dbugprintexpr(TOKEN tok);
+void markSkippedProgn(TOKEN tok);
+void removeMarkedProgn(TOKEN root);
+void switchOperands(TOKEN op);
+void exprCanonicalization(TOKEN root);
