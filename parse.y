@@ -171,7 +171,7 @@ variable        : IDENTIFIER                     { $$ = findid($1); }
                 | variable DOT IDENTIFIER
                 | variable POINT
                 ;
-funcall         : IDENTIFIER LPAREN expr_list RPAREN
+funcall         : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($4, $1, $3); }
                 ;
 expr_list       : expression COMMA expr_list
                 | expression
@@ -251,7 +251,8 @@ TOKEN makeop(int opnum)
 /* makeintc makes a new integer number token with num as its value */
 TOKEN makeintc(int num)
   { TOKEN tok = (TOKEN) talloc();
-    tok->tokentype = INTEGER;
+    tok->tokentype = NUMBERTOK;
+    tok->basicdt = INTEGER;
     tok->intval = num;
     return tok;
   }
@@ -304,11 +305,9 @@ TOKEN makeprogn(TOKEN tok, TOKEN statements)
 
 /* makelabel makes a new label, using labelnumber++ */
 TOKEN makelabel()
-  { TOKEN tok = (TOKEN) talloc();
-    tok->tokentype = RESERVED;
-    tok->whichval = LABELOP;
-    tok->operands = makeintc(labelnumber++);
-    return tok;
+  { TOKEN toklabel = makeop(LABELOP);
+    toklabel->operands = makeintc(labelnumber++);
+    return toklabel;
   }
 
 /* dolabel is the action for a label of the form   <number>: <statement>
@@ -327,8 +326,9 @@ void  instlabel (TOKEN num)
 /* makegoto makes a GOTO operator to go to the specified label.
    The label number is put into a number token. */
 TOKEN makegoto(int label)
-  {
-
+  {  TOKEN tokgoto = makeop(GOTOOP);
+     tokgoto->operands = makeintc(label);
+     return tokgoto;
   }
 
 /* dogoto is the action for a goto statement.
@@ -341,8 +341,11 @@ TOKEN dogoto(TOKEN tok, TOKEN labeltok)
 /* makefuncall makes a FUNCALL operator and links it to the fn and args.
    tok is a (now) unused token that is recycled. */
 TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
-  {
-
+  {  tok->tokentype = OPERATOR;
+     tok->whichval = FUNCALLOP;
+     tok->operands = fn;
+     fn->link = args;
+     return tok;
   }
 
 /* makeprogram makes the tree structures for the top-level program */
@@ -353,11 +356,12 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
      tokprogram->operands = name;
      TOKEN tokprogn = (TOKEN) talloc();
      name->link = makeprogn(tokprogn, args);
-     tokprogn->link = makeprogn(((TOKEN) talloc()), statements);
+     tokprogn->link = statements;
      if (DEBUG & DB_MAKEPROGRAM)
         { printf("\nmakeprogram\n");
           dbugprinttok(tokprogram);
           dbugprinttok(name);
+          dbugprinttok(tokprogn);
           dbugprinttok(args);
           dbugprinttok(statements);
         }
@@ -371,7 +375,25 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
    tok, tokb and tokc are (now) unused tokens that are recycled. */
 TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
               TOKEN tokc, TOKEN statement)
-  {  if (DEBUG & DB_MAKEFOR)
+  {  TOKEN tokprogn = (TOKEN) talloc();
+     if (sign > 0)
+        { TOKEN tokas = makeop(ASSIGNOP);
+          makeprogn(tokprogn, tokas);
+          /* build the tokas binop as (:= i start) */
+          binop(tokas, findid(tok), asg);
+          TOKEN toklabel = makelabel();
+          tokas->link = toklabel;
+          /* tokb becomes if statement with goto */
+          toklabel->link = tokb;
+          TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
+          /* tokc becomes progn containing thenpart and i++ and goto */
+          makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
+          statement->link = makeplus(tok, makeintc(1), makeop(PLUSOP));
+          statement->link->link = makegoto(labelnumber - 1);
+        } /* else
+        { // TODO change sign in function call and implement downto
+        } */
+     if (DEBUG & DB_MAKEFOR)
         { printf("\nmakefor\n");
           dbugprinttok(tok);
           dbugprinttok(asg);
@@ -380,23 +402,7 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           dbugprinttok(tokc);
           dbugprinttok(statement);
         };
-     if (sign > 0)
-        { TOKEN tokas = makeop(ASSIGNOP);
-          /* build the tokas binop as (:= i start) */
-          binop(tokas, findid(tok), asg);
-          tokc = makeprogn(((TOKEN) talloc()), tokas);
-          TOKEN toklabel = makelabel();
-          tokas->link = toklabel;
-          /* tokb becomes if statement with goto */
-          toklabel->link = tokb;
-          /* build if statement */
-          TOKEN tokle = binop(makeop(LEOP), tok, endexpr);
-          /* tokc becomes progn containing thenpart and i++ and goto */
-          makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
-        } /* else
-        { // TODO change sign in function call and implement downto
-        } */
-     return tokc;
+     return tokprogn;
   }
 
 /* findid finds an identifier in the symbol table, sets up symbol table
@@ -457,6 +463,20 @@ void  instvars(TOKEN idlist, TOKEN typetok)
           sym->basicdt = typesym->basicdt;
           idlist = idlist->link;
         };
+  }
+
+/* makeplus makes a + operator.
+   tok (if not NULL) is a (now) unused token that is recycled. */
+TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
+  {  tok = (tok) ? tok : (TOKEN) talloc();
+     tok->tokentype = OPERATOR;
+     tok->whichval = PLUSOP;
+     TOKEN tokas = makeop(ASSIGNOP);
+     tokas->operands = lhs;
+     lhs->link = tok;
+     tok->operands = lhs;
+     lhs->link = rhs;
+     return tokas;
   }
 
 void yyerror (char const *s)
