@@ -80,9 +80,11 @@ cdef_list       : cdef SEMICOLON cdef_list
                 ;
 cdef            : IDENTIFIER EQ constant
                 ;
-constant    /*  : sign? IDENTIFIER
-                | sign? NUMBER  */
-                : STRING  /* change : back to | later */
+constant        : sign IDENTIFIER
+                | IDENTIFIER                     { $$ = $1; }
+                | sign NUMBER
+                | NUMBER                         { $$ = $1; }
+                | STRING                         { $$ = $1; }
                 ;
 tblock          : TYPE tdef_list vblock
                 | vblock
@@ -144,27 +146,39 @@ endif           : ELSE statement                 { $$ = $2; }
 expression      : expression compare_op expr
                 | expr
                 ;
-compare_op      : EQ | LT | GT| NE | GE | IN
+compare_op      : EQ                            { $$ = $1; }
+                | LT                            { $$ = $1; }
+                | GT                            { $$ = $1; }
+                | NE                            { $$ = $1; }
+                | GE                            { $$ = $1; }
+                | IN                            { $$ = $1; }
                 ;
-expr            : /* sign? v also change to plus_op */ term
-                | expr PLUS term                 { $$ = binop($2, $1, $3); }
-                | /* sign? */ term
+expr            : sign term
+                | term
+                | expr plus_op term              { $$ = binop($2, $1, $3); }
                 ;
-plus_op         : PLUS | MINUS | OR
+plus_op         : PLUS                           { $$ = $1; }
+                | MINUS                          { $$ = $1; }
+                | OR                             { $$ = $1; }
                 ;
-term            : term TIMES factor              { $$ = binop($2, $1, $3); }
-                | factor /* TODO change TIMES to times_op */
+term            : term times_op factor           { $$ = binop($2, $1, $3); }
+                | factor
                 ;
-times_op        : TIMES | DIVIDE | DIV | MOD | AND
+times_op        : TIMES                          { $$ = $1; }
+                | DIVIDE                         { $$ = $1; }
+                | DIV                            { $$ = $1; }
+                | MOD                            { $$ = $1; }
+                | AND                            { $$ = $1; }
                 ;
 factor          : unsigned_constant
                 | variable
                 | funcall
-                | LPAREN expression RPAREN          { $$ = $2; }
-                | NUMBER
+                | LPAREN expression RPAREN       { $$ = $2; }
                 | NOT factor
                 ;
-unsigned_constant : NUMBER | NIL | STRING
+unsigned_constant : NUMBER                       { $$ = $1; }
+                | NIL                            { $$ = $1; }
+                | STRING                         { $$ = $1; }
                 ;
 variable        : IDENTIFIER                     { $$ = findid($1); }
                 | variable LBRACKET expr_list RBRACKET
@@ -184,7 +198,8 @@ fields          : idlist COLON type
 idlist          : IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
                 | IDENTIFIER                     { $$ = cons($1, NULL); }
                 ;
-sign            : PLUS | MINUS
+sign            : PLUS                           { $$ = $1; }
+                | MINUS                          { $$ = $1; }
                 ;
 
 %%
