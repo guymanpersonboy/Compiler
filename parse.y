@@ -82,7 +82,7 @@ cdef            : IDENTIFIER EQ constant
                 ;
 constant        : sign IDENTIFIER
                 | IDENTIFIER                     { $$ = $1; }
-                | sign NUMBER
+                | sign NUMBER                    { $$ = mulint($2, $1->intval); }
                 | NUMBER                         { $$ = $1; }
                 | STRING                         { $$ = $1; }
                 ;
@@ -121,16 +121,17 @@ statement       : BEGINBEGIN statement endpart
                           { $$ = makeprogn($1,cons($2, $3)); }
                 | IF expression THEN statement endif
                           { $$ = makeif($1, $2, $4, $5); }
-                | variable ASSIGN expression /* assignment */
-                          { $$ = binop($2, $1, $3); }
+                | assignment
                 | funcall
                 | WHILE expression DO statement
                 | REPEAT statement_list UNTIL expression
-                | FOR IDENTIFIER ASSIGN expression TO expression DO statement
+                | FOR assignment TO expression DO statement
                           /* (int sign, tok, asg, tokb, endexpr, tokc, statement) */
-                          { $$ = makefor(1, $2, $4, $5, $6, $7, $8);}
+                          { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
                 | GOTO NUMBER
                 | label
+                ;
+assignment      : variable ASSIGN expression     { $$ = binop($2, $1, $3); }
                 ;
 statement_list  : statement SEMICOLON statement_list
                 | statement
@@ -198,8 +199,8 @@ fields          : idlist COLON type
 idlist          : IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
                 | IDENTIFIER                     { $$ = cons($1, NULL); }
                 ;
-sign            : PLUS                           { $$ = $1; }
-                | MINUS                          { $$ = $1; }
+sign            : PLUS                           { $$ = fillintc($1, 1); }
+                | MINUS                          { $$ = fillintc($1, -1); }
                 ;
 
 %%
@@ -211,7 +212,7 @@ sign            : PLUS                           { $$ = $1; }
    are working.
   */
 
-#define DEBUG          0           /* set bits here for debugging, 0 = off  */
+#define DEBUG          8           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       1           /* bit to trace binop */
 #define DB_MAKEIF      2           /* bit to trace makeif */
@@ -261,6 +262,14 @@ TOKEN makeop(int opnum)
     tok->tokentype = OPERATOR;
     tok->whichval = opnum;
     return tok;
+  }
+
+/* fillintc smashes tok, making it into an INTEGER constant with value num */
+TOKEN fillintc(TOKEN tok, int num)
+  {  tok->tokentype = NUMBERTOK;
+     tok->basicdt = INTEGER;
+     tok->intval = num;
+     return tok;
   }
 
 /* makeintc makes a new integer number token with num as its value */
@@ -390,16 +399,12 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
    tok, tokb and tokc are (now) unused tokens that are recycled. */
 TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
               TOKEN tokc, TOKEN statement)
-  {  TOKEN tokprogn = (TOKEN) talloc();
-     if (sign > 0)
-        { TOKEN tokas = makeop(ASSIGNOP);
-          makeprogn(tokprogn, tokas);
-          /* build the tokas binop as (:= i start) */
-          binop(tokas, findid(tok), asg);
-          TOKEN tok1 = copytok(tok);
-          TOKEN tok2 = copytok(tok);
+  {  if (sign > 0)
+        { makeprogn(tok, asg);
+          TOKEN tok1 = copytok(asg->operands);
+          TOKEN tok2 = copytok(asg->operands);
           TOKEN toklabel = makelabel();
-          tokas->link = toklabel;
+          asg->link = toklabel;
           /* tokb becomes if statement with goto */
           toklabel->link = tokb;
           TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
@@ -407,7 +412,8 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
           statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
           statement->link->link = makegoto(labelnumber - 1);
-        } /* else
+        }
+  /* else
         { // TODO change sign in function call and implement downto
         } */
      if (DEBUG & DB_MAKEFOR)
@@ -419,24 +425,29 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           dbugprinttok(tokc);
           dbugprinttok(statement);
         };
-     return tokprogn;
+     return tok;
   }
 
 /* findid finds an identifier in the symbol table, sets up symbol table
    pointers, changes a constant to its number equivalent */
 TOKEN findid(TOKEN tok) /* the ID token */
-  {  SYMBOL sym = searchst(tok->stringval);
+  {  if (DEBUG & DB_FINDID)
+        { printf("findid\n");
+          dbugprinttok(tok);
+        };
+     SYMBOL sym = searchst(tok->stringval);
      tok->symentry = sym;
      SYMBOL typ = sym->datatype;
      tok->symtype = typ;
      if (typ->kind == BASICTYPE ||
             typ->kind == POINTERSYM)
         { tok->basicdt = typ->basicdt; };
-     if (DEBUG & DB_FINDID)
-        { printf("instvars\n");
-          dbugprinttok(tok);
-        };
      return tok;
+  }
+
+/* instconst installs a constant in the symbol table */
+void  instconst(TOKEN idtok, TOKEN consttok)
+  {  return (void)// TODO need to complete cblock rules for graph1
   }
 
 /* findtype looks up a type name in the symbol table, puts the pointer
@@ -489,12 +500,19 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
      tok->tokentype = OPERATOR;
      tok->whichval = PLUSOP;
      TOKEN tokas = makeop(ASSIGNOP);
-     TOKEN tok1 = copytok(lhs);
      tokas->operands = lhs;
-     lhs->link = tok;
-     tok->operands = tok1;
-     tok1->link = rhs;
+     TOKEN tok1 = copytok(lhs);
+     lhs->link = binop(tok, tok1, rhs);
      return tokas;
+  }
+
+/* mulint multiplies expression exp by integer n */
+TOKEN mulint(TOKEN exp, int n)
+  {  if (exp->basicdt == INTEGER)
+        { exp->intval *= n; }
+     if (exp->basicdt == REAL)
+        { exp->realval *= n; }
+     return exp;
   }
 
 void yyerror (char const *s)
