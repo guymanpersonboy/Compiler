@@ -72,18 +72,18 @@ lblock          : LABEL numlist SEMICOLON cblock
 numlist         : NUMBER COMMA numlist
                 | NUMBER
                 ;
-cblock          : CONST cdef_list tblock
+cblock          : CONST cdef_list tblock       { $$ = $3; }
                 | tblock
                 ;
 cdef_list       : cdef SEMICOLON cdef_list
                 | cdef SEMICOLON
                 ;
-cdef            : IDENTIFIER EQ constant
+cdef            : IDENTIFIER EQ constant         { instconst($1, $3); }
                 ;
 constant        : sign IDENTIFIER
-                | IDENTIFIER                     { $$ = $1; }
+                | IDENTIFIER                     { $$ = findtype($1); }
                 | sign NUMBER                    { $$ = mulint($2, $1->intval); }
-                | NUMBER                         { $$ = $1; }
+                | NUMBER                         { $$ = findtype($1); }
                 | STRING                         { $$ = $1; }
                 ;
 tblock          : TYPE tdef_list vblock
@@ -212,7 +212,7 @@ sign            : PLUS                           { $$ = fillintc($1, 1); }
    are working.
   */
 
-#define DEBUG          8           /* set bits here for debugging, 0 = off  */
+#define DEBUG         24           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       1           /* bit to trace binop */
 #define DB_MAKEIF      2           /* bit to trace makeif */
@@ -220,7 +220,8 @@ sign            : PLUS                           { $$ = fillintc($1, 1); }
 #define DB_MAKEPROGRAM 4           /* bit to trace makeprogram */
 #define DB_MAKEFOR     4           /* bit to trace makefor */
 #define DB_FINDID      8           /* bit to trace findid */
-#define DB_FINDTYPE    8           /* bit to trace findtype */
+#define DB_INSTCONST   8           /* bit to trace instconst */
+#define DB_FINDTYPE   16           /* bit to trace findtype */
 #define DB_INSTVARS   16           /* bit to trace instvars */
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
@@ -268,6 +269,10 @@ TOKEN makeop(int opnum)
 TOKEN fillintc(TOKEN tok, int num)
   {  tok->tokentype = NUMBERTOK;
      tok->basicdt = INTEGER;
+     tok->symtype = NULL;
+     tok->symentry = NULL;
+     tok->operands = NULL;
+     tok->link = NULL;
      tok->intval = num;
      return tok;
   }
@@ -447,13 +452,43 @@ TOKEN findid(TOKEN tok) /* the ID token */
 
 /* instconst installs a constant in the symbol table */
 void  instconst(TOKEN idtok, TOKEN consttok)
-  {  return (void)// TODO need to complete cblock rules for graph1
+  {  if (DEBUG & DB_INSTCONST)
+        { printf("instconst\n");
+          dbugprinttok(idtok);
+          dbugprinttok(consttok);
+        };
+     SYMBOL typesym = consttok->symtype;
+     int align = alignsize(typesym);
+     SYMBOL sym = insertsym(idtok->stringval);
+     sym->kind = CONSTSYM;
+     sym->offset = /* "next" */
+         wordaddress(blockoffs[blocknumber], align);
+     sym->size = typesym->size;
+     blockoffs[blocknumber] = /* "next" */
+         sym->offset + sym->size;
+     sym->datatype = typesym;
+     sym->basicdt = typesym->basicdt;
   }
 
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
-  {  SYMBOL sym = searchst(tok->stringval);
+  {  SYMBOL sym;
+     if (tok->tokentype == NUMBERTOK)
+        { switch tok->basicdt
+            { case INTEGER:
+                sym = searchst("integer");
+                break
+              case REAL:
+                sym = searchst("real");
+                break;
+              case STRINGTYPE:
+              case BOOLTYPE:
+              case POINTER:
+                assert(1); // TODO
+             };
+        };
+     sym = searchst(tok->stringval);
      tok->symtype = sym;
      if (DEBUG & DB_FINDTYPE)
         { printf("findtype\n");
