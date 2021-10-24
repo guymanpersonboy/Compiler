@@ -30,6 +30,7 @@
            the IF statement, but Yacc's default resolves it in the right way.*/
 
 #include <stdio.h>
+#include <string.h>
 #include <ctype.h>
 #include "token.h"
 #include "lexan.h"
@@ -80,7 +81,7 @@ cdef_list       : cdef SEMICOLON cdef_list
                 ;
 cdef            : IDENTIFIER EQ constant         { instconst($1, $3); }
                 ;
-constant        : sign IDENTIFIER
+constant        : sign IDENTIFIER                // TODO
                 | IDENTIFIER                     { $$ = findtype($1); }
                 | sign NUMBER                    { $$ = mulint($2, $1->intval); }
                 | NUMBER                         { $$ = findtype($1); }
@@ -147,14 +148,14 @@ endif           : ELSE statement                 { $$ = $2; }
 expression      : expression compare_op expr
                 | expr
                 ;
-compare_op      : EQ                            { $$ = $1; }
-                | LT                            { $$ = $1; }
-                | GT                            { $$ = $1; }
-                | NE                            { $$ = $1; }
-                | GE                            { $$ = $1; }
-                | IN                            { $$ = $1; }
+compare_op      : EQ                             { $$ = $1; }
+                | LT                             { $$ = $1; }
+                | GT                             { $$ = $1; }
+                | NE                             { $$ = $1; }
+                | GE                             { $$ = $1; }
+                | IN                             { $$ = $1; }
                 ;
-expr            : sign term
+expr            : sign term                      { $$ = unaryop($1, $2); }
                 | term
                 | expr plus_op term              { $$ = binop($2, $1, $3); }
                 ;
@@ -199,8 +200,8 @@ fields          : idlist COLON type
 idlist          : IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
                 | IDENTIFIER                     { $$ = cons($1, NULL); }
                 ;
-sign            : PLUS                           { $$ = fillintc($1, 1); }
-                | MINUS                          { $$ = fillintc($1, -1); }
+sign            : PLUS                           { $$ = $1; }
+                | MINUS                          { $$ = $1; }
                 ;
 
 %%
@@ -212,7 +213,7 @@ sign            : PLUS                           { $$ = fillintc($1, 1); }
    are working.
   */
 
-#define DEBUG         24           /* set bits here for debugging, 0 = off  */
+#define DEBUG          0           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       1           /* bit to trace binop */
 #define DB_MAKEIF      2           /* bit to trace makeif */
@@ -256,6 +257,12 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
     return op;
   }
 
+/* unaryop links a unary operator op to one operand, lhs */
+TOKEN unaryop(TOKEN op, TOKEN lhs)
+  { op->operands = lhs;
+    return op;
+  }
+
 /* makeop makes a new operator token with operator number opnum.
    Example:  makeop(FLOATOP)  */
 TOKEN makeop(int opnum)
@@ -267,14 +274,14 @@ TOKEN makeop(int opnum)
 
 /* fillintc smashes tok, making it into an INTEGER constant with value num */
 TOKEN fillintc(TOKEN tok, int num)
-  {  tok->tokentype = NUMBERTOK;
-     tok->basicdt = INTEGER;
-     tok->symtype = NULL;
-     tok->symentry = NULL;
-     tok->operands = NULL;
-     tok->link = NULL;
-     tok->intval = num;
-     return tok;
+  { tok->tokentype = NUMBERTOK;
+    tok->basicdt = INTEGER;
+    tok->symtype = NULL;
+    tok->symentry = NULL;
+    tok->operands = NULL;
+    tok->link = NULL;
+    tok->intval = num;
+    return tok;
   }
 
 /* makeintc makes a new integer number token with num as its value */
@@ -412,12 +419,13 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           asg->link = toklabel;
           /* tokb becomes if statement with goto */
           toklabel->link = tokb;
+          // findid(endexpr);
           TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
           /* tokc becomes progn containing thenpart and i++ and goto */
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
           statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
           statement->link->link = makegoto(labelnumber - 1);
-        }
+        };
   /* else
         { // TODO change sign in function call and implement downto
         } */
@@ -440,6 +448,8 @@ TOKEN findid(TOKEN tok) /* the ID token */
         { printf("findid\n");
           dbugprinttok(tok);
         };
+    //  printf("1: %s\n", tok->stringval);
+    //  printf("1: %d\n", tok->intval);
      SYMBOL sym = searchst(tok->stringval);
      tok->symentry = sym;
      SYMBOL typ = sym->datatype;
@@ -447,6 +457,28 @@ TOKEN findid(TOKEN tok) /* the ID token */
      if (typ->kind == BASICTYPE ||
             typ->kind == POINTERSYM)
         { tok->basicdt = typ->basicdt; };
+     if (sym->kind == CONSTSYM) /* set a constant to its number */
+        { switch (sym->basicdt)
+          { case INTEGER:
+              tok->tokentype = NUMBERTOK;
+              tok->intval = sym->constval.intnum;
+              break;
+            case REAL:
+              // printf("const: %s\n", tok->stringval);
+              tok->tokentype = NUMBERTOK;
+              tok->realval = sym->constval.realnum;
+              break;
+            case STRINGTYPE:
+              strcpy(tok->stringval, sym->constval.stringconst);
+              break;
+            case BOOLETYPE:
+            case POINTER:
+              printf("TODO\n\n");
+          };
+        };
+    //  printf("%s\n", tok->stringval);
+    //  printf("%d\n", tok->intval);
+    //  printf("%f\n", tok->realval);
      return tok;
   }
 
@@ -457,6 +489,7 @@ void  instconst(TOKEN idtok, TOKEN consttok)
           dbugprinttok(idtok);
           dbugprinttok(consttok);
         };
+     
      SYMBOL typesym = consttok->symtype;
      int align = alignsize(typesym);
      SYMBOL sym = insertsym(idtok->stringval);
@@ -468,28 +501,39 @@ void  instconst(TOKEN idtok, TOKEN consttok)
          sym->offset + sym->size;
      sym->datatype = typesym;
      sym->basicdt = typesym->basicdt;
+     switch (sym->basicdt)
+        { case INTEGER:
+            sym->constval.intnum = consttok->intval;
+            break;
+          case REAL:
+            sym->constval.realnum = consttok->realval;
+            break;
+          case STRINGTYPE:
+            strcpy(sym->constval.stringconst, consttok->stringval);
+            break;
+          case BOOLETYPE:
+          case POINTER:
+            printf("TODO\n\n");
+        };
   }
 
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
-  {  SYMBOL sym;
-     if (tok->tokentype == NUMBERTOK)
-        { switch tok->basicdt
+  {  if (tok->tokentype == NUMBERTOK)
+        { switch (tok->basicdt)
             { case INTEGER:
-                sym = searchst("integer");
-                break
-              case REAL:
-                sym = searchst("real");
+                tok->symtype = searchst("integer");
                 break;
-              case STRINGTYPE:
-              case BOOLTYPE:
-              case POINTER:
-                assert(1); // TODO
-             };
-        };
-     sym = searchst(tok->stringval);
-     tok->symtype = sym;
+              case REAL:
+                tok->symtype = searchst("real");
+                break;
+              default:
+                printf("TODO findtype default case %d\n", tok->tokentype);
+            };
+        } else {
+          tok->symtype = searchst(tok->stringval);
+        }
      if (DEBUG & DB_FINDTYPE)
         { printf("findtype\n");
           dbugprinttok(tok);
