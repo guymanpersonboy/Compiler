@@ -31,6 +31,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <ctype.h>
 #include "token.h"
 #include "lexan.h"
@@ -81,7 +82,7 @@ cdef_list       : cdef SEMICOLON cdef_list
                 ;
 cdef            : IDENTIFIER EQ constant         { instconst($1, $3); }
                 ;
-constant        : sign IDENTIFIER                // TODO
+constant        : sign IDENTIFIER                /* TODO */
                 | IDENTIFIER                     { $$ = findtype($1); }
                 | sign NUMBER                    { $$ = mulint($2, $1->intval); }
                 | NUMBER                         { $$ = findtype($1); }
@@ -213,7 +214,7 @@ sign            : PLUS                           { $$ = $1; }
    are working.
   */
 
-#define DEBUG          0           /* set bits here for debugging, 0 = off  */
+#define DEBUG          1           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       1           /* bit to trace binop */
 #define DB_MAKEIF      2           /* bit to trace makeif */
@@ -248,6 +249,46 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
   { op->operands = lhs;          /* link operands to operator       */
     lhs->link = rhs;             /* link second operand to first    */
     rhs->link = NULL;            /* terminate operand list          */
+    if (lhs->whichval == FUNCALLOP) { makefloat(lhs); };
+    if (rhs->whichval == FUNCALLOP) { makefloat(rhs); };
+    if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
+       { op->basicdt = INTEGER;
+         TOKEN tokfix = makeop(FIXOP);
+         tokfix->basicdt = INTEGER;
+         lhs->link = tokfix;
+         tokfix->operands = rhs;
+       }
+    else if (op->whichval == ASSIGNOP && lhs->basicdt == REAL && lhs->basicdt == INTEGER)
+       { op->basicdt = REAL;
+         TOKEN tokfix = makeop(FLOATOP);
+         tokfix->basicdt = REAL;
+         lhs->link = tokfix;
+         tokfix->operands = rhs;
+       }
+    else if (lhs->basicdt == INTEGER && rhs->basicdt == REAL)
+       { op->basicdt = REAL;
+         if (lhs->symentry && lhs->symentry->kind == CONSTSYM)
+            { makefloat(lhs);
+              return op;
+            };
+         TOKEN tokfloat = makeop(FLOATOP);
+         tokfloat->basicdt = REAL;
+         op->operands = rhs;
+         rhs->link = tokfloat;
+         tokfloat->operands = lhs;
+       }
+    else if (lhs->basicdt == REAL && rhs->basicdt == INTEGER)
+       { op->basicdt = REAL;
+         if (rhs->symentry && rhs->symentry->kind == CONSTSYM)
+            { makefloat(rhs);
+              return op;
+            };
+         TOKEN tokfloat = makeop(FLOATOP);
+         tokfloat->basicdt = REAL;
+         op->operands = lhs;
+         lhs->link = tokfloat;
+         tokfloat->operands = rhs;
+       };
     if (DEBUG & DB_BINOP)
        { printf("binop\n");
          dbugprinttok(op);
@@ -269,6 +310,26 @@ TOKEN makeop(int opnum)
   { TOKEN tok = (TOKEN) talloc();   /* = new token */
     tok->tokentype = OPERATOR;
     tok->whichval = opnum;
+    return tok;
+  }
+
+/* makefloat forces the item tok to be floating, by floating a constant
+   or by inserting a FLOATOP operator */
+TOKEN makefloat(TOKEN tok)
+  { if (tok->tokentype == OPERATOR && tok->whichval == FUNCALLOP)
+       { tok->basicdt = tok->operands->link->basicdt; }
+    else
+       { tok->basicdt = REAL;
+         tok->realval = 1.0 * tok->intval;
+       };
+    return tok;
+  }
+
+/* makefix forces the item tok to be integer, by truncating a constant
+   or by inserting a FIXOP operator */
+TOKEN makefix(TOKEN tok)
+  { tok->basicdt = INTEGER;
+    tok->intval = trunc(tok->realval);
     return tok;
   }
 
