@@ -130,7 +130,6 @@ statement       : BEGINBEGIN statement endpart
                 | REPEAT statement_list UNTIL expression
                           { $$ = makerepeat($1, $2, $3, $4); }
                 | FOR assignment TO expression DO statement
-                          /* (int sign, tok, asg, tokb, endexpr, tokc, statement) */
                           { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
                 | GOTO NUMBER
                 | label
@@ -138,6 +137,7 @@ statement       : BEGINBEGIN statement endpart
 assignment      : variable ASSIGN expression     { $$ = binop($2, $1, $3); }
                 ;
 statement_list  : statement SEMICOLON statement_list
+                          { $$ = cons($1, $3); }
                 | statement
                 ;
 label           : NUMBER COLON statement
@@ -148,7 +148,7 @@ endpart         : SEMICOLON statement endpart    { $$ = cons($2, $3); }
 endif           : ELSE statement                 { $$ = $2; }
                 | /* empty */                    { $$ = NULL; }
                 ;
-expression      : expression compare_op expr
+expression      : expression compare_op expr     { $$ = binop($2, $1, $3); }
                 | expr
                 ;
 compare_op      : EQ                             { $$ = $1; }
@@ -216,7 +216,7 @@ sign            : PLUS                           { $$ = $1; }
    are working.
   */
 
-#define DEBUG          1           /* set bits here for debugging, 0 = off  */
+#define DEBUG          0           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       1           /* bit to trace binop */
 #define DB_MAKEIF      2           /* bit to trace makeif */
@@ -251,8 +251,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
   { op->operands = lhs;          /* link operands to operator       */
     lhs->link = rhs;             /* link second operand to first    */
     rhs->link = NULL;            /* terminate operand list          */
-    if (lhs->whichval == FUNCALLOP) { makefloat(lhs); };
-    if (rhs->whichval == FUNCALLOP) { makefloat(rhs); };
+
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
        { op->basicdt = INTEGER;
          TOKEN tokfix = makeop(FIXOP);
@@ -509,7 +508,6 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           asg->link = toklabel;
           /* tokb becomes if statement with goto */
           toklabel->link = tokb;
-          // findid(endexpr);
           TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
           /* tokc becomes progn containing thenpart and i++ and goto */
           makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
@@ -517,7 +515,7 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
           statement->link->link = makegoto(labelnumber - 1);
         };
   /* else
-        { // TODO change sign in function call and implement downto
+        { TODO change sign in function call and implement downto
         } */
      if (DEBUG & DB_MAKEFOR)
         { printf("\nmakefor\n");
@@ -538,8 +536,6 @@ TOKEN findid(TOKEN tok) /* the ID token */
         { printf("findid\n");
           dbugprinttok(tok);
         };
-    //  printf("1: %s\n", tok->stringval);
-    //  printf("1: %d\n", tok->intval);
      SYMBOL sym = searchst(tok->stringval);
      tok->symentry = sym;
      SYMBOL typ = sym->datatype;
@@ -554,7 +550,6 @@ TOKEN findid(TOKEN tok) /* the ID token */
               tok->intval = sym->constval.intnum;
               break;
             case REAL:
-              // printf("const: %s\n", tok->stringval);
               tok->tokentype = NUMBERTOK;
               tok->realval = sym->constval.realnum;
               break;
@@ -566,9 +561,6 @@ TOKEN findid(TOKEN tok) /* the ID token */
               printf("TODO\n\n");
           };
         };
-    //  printf("%s\n", tok->stringval);
-    //  printf("%d\n", tok->intval);
-    //  printf("%f\n", tok->realval);
      return tok;
   }
 
@@ -581,14 +573,9 @@ void  instconst(TOKEN idtok, TOKEN consttok)
         };
      
      SYMBOL typesym = consttok->symtype;
-     int align = alignsize(typesym);
      SYMBOL sym = insertsym(idtok->stringval);
      sym->kind = CONSTSYM;
-     sym->offset = /* "next" */
-         wordaddress(blockoffs[blocknumber], align);
      sym->size = typesym->size;
-     blockoffs[blocknumber] = /* "next" */
-         sym->offset + sym->size;
      sym->datatype = typesym;
      sym->basicdt = typesym->basicdt;
      switch (sym->basicdt)
