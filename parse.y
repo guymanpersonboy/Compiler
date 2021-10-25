@@ -126,7 +126,9 @@ statement       : BEGINBEGIN statement endpart
                 | assignment
                 | funcall
                 | WHILE expression DO statement
+                          { $$ = makewhile($1, $2, $3, $4); }
                 | REPEAT statement_list UNTIL expression
+                          { $$ = makerepeat($1, $2, $3, $4); }
                 | FOR assignment TO expression DO statement
                           /* (int sign, tok, asg, tokb, endexpr, tokc, statement) */
                           { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
@@ -447,22 +449,49 @@ TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
 
 /* makeprogram makes the tree structures for the top-level program */
 TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
-  {  TOKEN tokprogram = (TOKEN) talloc();
-     tokprogram->tokentype = OPERATOR;
-     tokprogram->whichval = PROGRAMOP;
-     tokprogram->operands = name;
-     TOKEN tokprogn = (TOKEN) talloc();
-     name->link = makeprogn(tokprogn, args);
-     tokprogn->link = statements;
-     if (DEBUG & DB_MAKEPROGRAM)
-        { printf("\nmakeprogram\n");
-          dbugprinttok(tokprogram);
-          dbugprinttok(name);
-          dbugprinttok(tokprogn);
-          dbugprinttok(args);
-          dbugprinttok(statements);
-        }
+  { TOKEN tokprogram = (TOKEN) talloc();
+    tokprogram->tokentype = OPERATOR;
+    tokprogram->whichval = PROGRAMOP;
+    tokprogram->operands = name;
+    TOKEN tokprogn = (TOKEN) talloc();
+    name->link = makeprogn(tokprogn, args);
+    tokprogn->link = statements;
+    if (DEBUG & DB_MAKEPROGRAM)
+      { printf("\nmakeprogram\n");
+        dbugprinttok(tokprogram);
+        dbugprinttok(name);
+        dbugprinttok(tokprogn);
+        dbugprinttok(args);
+        dbugprinttok(statements);
+      }
     return tokprogram;
+  }
+
+/* makewhile makes structures for a while statement.
+   tok and tokb are (now) unused tokens that are recycled. */
+TOKEN makewhile(TOKEN tok, TOKEN expr, TOKEN tokb, TOKEN statement)
+  { TOKEN toklabel = makelabel();
+    TOKEN tokprol = makeprogn(tok, toklabel);
+    TOKEN tokpros = makeprogn(tokb, statement);
+    TOKEN tokif = (TOKEN) talloc();
+    makeif(tokif, expr, tokpros, makegoto(labelnumber - 1));
+    toklabel->link = tokif;
+    return tokprol;
+
+  }
+
+/* makerepeat makes structures for a repeat statement.
+   tok and tokb are (now) unused tokens that are recycled. */
+TOKEN makerepeat(TOKEN tok, TOKEN statements, TOKEN tokb, TOKEN expr)
+  { TOKEN toklabel = makelabel();
+    TOKEN tokprol = makeprogn(tok, toklabel);
+    TOKEN tokpros = makeprogn(tokb, statements);
+    toklabel->link = tokpros;
+    TOKEN tokif = (TOKEN) talloc();
+    TOKEN toknoop = (TOKEN) talloc();
+    makeif(tokif, expr, makeprogn(toknoop, NULL), makegoto(labelnumber - 1));
+    tokpros->link = tokif;
+    return tokprol;
   }
 
 /* makefor makes structures for a for statement.
