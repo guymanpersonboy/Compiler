@@ -254,8 +254,17 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
   { op->operands = lhs;          /* link operands to operator       */
     lhs->link = rhs;             /* link second operand to first    */
     rhs->link = NULL;            /* terminate operand list          */
-    op->basicdt = lhs->basicdt;
 
+    if (lhs->whichval == FUNCALLOP)
+       { SYMBOL sym = searchst(lhs->operands->stringval);
+         lhs->basicdt = sym->datatype->basicdt;
+       }
+    if (rhs->whichval == FUNCALLOP)
+       { SYMBOL sym = searchst(rhs->operands->stringval);
+         rhs->basicdt = sym->datatype->basicdt;
+       }
+    /* type propagation */
+    op->basicdt = lhs->basicdt || rhs->basicdt;
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
        { binop_assign(op, lhs, rhs, FIXOP);
        }
