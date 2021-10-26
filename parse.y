@@ -221,15 +221,15 @@ sign            : PLUS                           { $$ = $1; }
 
 #define DEBUG          0           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
-#define DB_BINOP       1           /* bit to trace binop */
-#define DB_MAKEIF      2           /* bit to trace makeif */
-#define DB_MAKEPROGN   2           /* bit to trace makeprogn */
-#define DB_MAKEPROGRAM 4           /* bit to trace makeprogram */
-#define DB_MAKEFOR     4           /* bit to trace makefor */
-#define DB_FINDID      8           /* bit to trace findid */
-#define DB_INSTCONST   8           /* bit to trace instconst */
-#define DB_FINDTYPE   16           /* bit to trace findtype */
-#define DB_INSTVARS   16           /* bit to trace instvars */
+#define DB_BINOP       2           /* bit to trace binop */
+#define DB_MAKEIF      4           /* bit to trace makeif */
+#define DB_MAKEPROGN   4           /* bit to trace makeprogn */
+#define DB_MAKEPROGRAM 8           /* bit to trace makeprogram */
+#define DB_MAKEFOR     8           /* bit to trace makefor */
+#define DB_FINDID     16           /* bit to trace findid */
+#define DB_INSTCONST  16           /* bit to trace instconst */
+#define DB_FINDTYPE   32           /* bit to trace findtype */
+#define DB_INSTVARS   64           /* bit to trace instvars */
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
  int labelnumber = 0;  /* sequential counter for internal label numbers */
@@ -258,11 +258,11 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
     if (lhs->whichval == FUNCALLOP)
        { SYMBOL sym = searchst(lhs->operands->stringval);
          lhs->basicdt = sym->datatype->basicdt;
-       }
+       };
     if (rhs->whichval == FUNCALLOP)
        { SYMBOL sym = searchst(rhs->operands->stringval);
          rhs->basicdt = sym->datatype->basicdt;
-       }
+       };
     /* type propagation */
     op->basicdt = lhs->basicdt || rhs->basicdt;
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
@@ -472,7 +472,7 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
         dbugprinttok(tokprogn);
         dbugprinttok(args);
         dbugprinttok(statements);
-      }
+      };
     return tokprogram;
   }
 
