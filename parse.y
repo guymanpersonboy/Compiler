@@ -39,6 +39,9 @@
 #include "parse.h"
 #include "pprint.h"
 
+static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum);
+static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
+
         /* define the type of the Yacc stack element to be TOKEN */
 
 #define YYSTYPE TOKEN
@@ -251,20 +254,13 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
   { op->operands = lhs;          /* link operands to operator       */
     lhs->link = rhs;             /* link second operand to first    */
     rhs->link = NULL;            /* terminate operand list          */
+    op->basicdt = lhs->basicdt;
 
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
-       { op->basicdt = INTEGER;
-         TOKEN tokfix = makeop(FIXOP);
-         tokfix->basicdt = INTEGER;
-         lhs->link = tokfix;
-         tokfix->operands = rhs;
+       { binop_assign(op, lhs, rhs, FIXOP);
        }
-    else if (op->whichval == ASSIGNOP && lhs->basicdt == REAL && lhs->basicdt == INTEGER)
-       { op->basicdt = REAL;
-         TOKEN tokfix = makeop(FLOATOP);
-         tokfix->basicdt = REAL;
-         lhs->link = tokfix;
-         tokfix->operands = rhs;
+    else if (op->whichval == ASSIGNOP && lhs->basicdt == REAL && rhs->basicdt == INTEGER)
+       { binop_assign(op, lhs, rhs, FLOATOP);
        }
     else if (lhs->basicdt == INTEGER && rhs->basicdt == REAL)
        { op->basicdt = REAL;
@@ -272,11 +268,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
             { makefloat(lhs);
               return op;
             };
-         TOKEN tokfloat = makeop(FLOATOP);
-         tokfloat->basicdt = REAL;
-         op->operands = rhs;
-         rhs->link = tokfloat;
-         tokfloat->operands = lhs;
+         binop_extra(op, lhs, rhs);
        }
     else if (lhs->basicdt == REAL && rhs->basicdt == INTEGER)
        { op->basicdt = REAL;
@@ -284,11 +276,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
             { makefloat(rhs);
               return op;
             };
-         TOKEN tokfloat = makeop(FLOATOP);
-         tokfloat->basicdt = REAL;
-         op->operands = lhs;
-         lhs->link = tokfloat;
-         tokfloat->operands = rhs;
+         binop_extra(op, rhs, lhs); /* lhs and rhs flipped */
        };
     if (DEBUG & DB_BINOP)
        { printf("binop\n");
@@ -297,6 +285,23 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
          dbugprinttok(rhs);
        };
     return op;
+  }
+
+/* binop assign coercion helper */
+static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum)
+  { TOKEN tokcoer = makeop(opnum);
+    tokcoer->basicdt = lhs->basicdt;
+    lhs->link = tokcoer;
+    tokcoer->operands = rhs;
+  }
+
+/* binop operator coercion helper */
+static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs)
+  { TOKEN tokfloat = makeop(FLOATOP);
+    tokfloat->basicdt = REAL;
+    op->operands = rhs;
+    rhs->link = tokfloat;
+    tokfloat->operands = lhs;
   }
 
 /* unaryop links a unary operator op to one operand, lhs */
@@ -317,12 +322,8 @@ TOKEN makeop(int opnum)
 /* makefloat forces the item tok to be floating, by floating a constant
    or by inserting a FLOATOP operator */
 TOKEN makefloat(TOKEN tok)
-  { if (tok->tokentype == OPERATOR && tok->whichval == FUNCALLOP)
-       { tok->basicdt = tok->operands->link->basicdt; }
-    else
-       { tok->basicdt = REAL;
-         tok->realval = 1.0 * tok->intval;
-       };
+  { tok->basicdt = REAL;
+    tok->realval = 1.0 * tok->intval;
     return tok;
   }
 
@@ -597,8 +598,8 @@ void  instconst(TOKEN idtok, TOKEN consttok)
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
-  {  if (tok->tokentype == NUMBERTOK)
-        { switch (tok->basicdt)
+  { if (tok->tokentype == NUMBERTOK)
+       { switch (tok->basicdt)
             { case INTEGER:
                 tok->symtype = searchst("integer");
                 break;
@@ -606,16 +607,17 @@ TOKEN findtype(TOKEN tok)
                 tok->symtype = searchst("real");
                 break;
               default:
-                printf("TODO findtype default case %d\n", tok->tokentype);
+                printf("TODO change case %d\n", tok->tokentype);
             };
-        } else {
-          tok->symtype = searchst(tok->stringval);
-        }
-     if (DEBUG & DB_FINDTYPE)
-        { printf("findtype\n");
-          dbugprinttok(tok);
-        };
-     return tok;
+       }
+    else
+       { tok->symtype = searchst(tok->stringval); 
+       };
+    if (DEBUG & DB_FINDTYPE)
+       { printf("findtype\n");
+         dbugprinttok(tok);
+       };
+    return tok;
   }
 
 /* wordaddress pads the offset n to be a multiple of wordsize.
