@@ -97,7 +97,7 @@ tblock          : TYPE tdef_list vblock
 tdef_list       : tdef SEMICOLON tdef_list
                 | tdef SEMICOLON
                 ;
-tdef            : IDENTIFIER EQ type
+tdef            : IDENTIFIER EQ type             { $$ = insttype($1, $3); }
                 ;
 vblock          : VAR varspecs block             { $$ = $3; }
                 | block
@@ -109,18 +109,18 @@ vargroup        : idlist COLON type              { instvars($1, $3); }
                 ;
 type            : simpletype
                 | ARRAY LBRACKET simpletype_list RBRACKET OF type
-                | RECORD field_list END
+                | RECORD field_list END          { instrec($1, $2); }
                 | POINT IDENTIFIER
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
-                | LPAREN idlist RPAREN
+                | LPAREN idlist RPAREN           /* enum? */
                 | constant DOTDOT constant
                 ; /* $1->symtype returns type */
 simpletype_list : simpletype COMMA simpletype_list
                 | simpletype
                 ;
 block           : BEGINBEGIN statement endpart
-                      { $$ = makeprogn($1, cons($2, $3)); }
+                          { $$ = makeprogn($1, cons($2, $3)); }
                 ;
 statement       : BEGINBEGIN statement endpart
                           { $$ = makeprogn($1,cons($2, $3)); }
@@ -197,11 +197,11 @@ funcall         : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($4, $1,
                 ;
 expr_list       : expression COMMA expr_list
                 | expression
+                ;        /* delete */            /* TODO may need to flip */
+field_list      : fields SEMICOLON field_list    { $$ = nconc($1, $3); }
+                | fields                         { $$ = nconc(NULL, $1)}
                 ;
-field_list      : fields SEMICOLON field_list
-                | fields
-                ;
-fields          : idlist COLON type
+fields          : idlist COLON type              { $$ = instfields($1, $3); }
                 ;
 idlist          : IDENTIFIER COMMA idlist        { $$ = cons($1, $3); }
                 | IDENTIFIER                     { $$ = cons($1, NULL); }
@@ -247,6 +247,23 @@ TOKEN cons(TOKEN item, TOKEN list)           /* add item to front of list */
          dbugprinttok(list);
        };
     return item;
+  }
+
+/* nconc concatenates two token lists, destructively, by making the last link
+   of lista point to listb.
+   (nconc '(a b) '(c d e))  =  (a b c d e)  */
+/* nconc is useful for putting together two fieldlist groups to
+   make them into a single list in a record declaration. */
+/* nconc should return lista, or listb if lista is NULL. */
+TOKEN nconc(TOKEN lista, TOKEN listb)
+  { if (lista == NULL) return listb;
+    TOKEN a = lista;
+    /* TODO also add a SYMBOL to each tok->symentry and link each sym through sym->link */
+    while (a->link != NULL)
+       { a = a->link;
+       };
+    a->link = listb;
+    return lista;
   }
 
 /* binop links a binary operator op to two operands, lhs and rhs. */
@@ -581,7 +598,6 @@ void  instconst(TOKEN idtok, TOKEN consttok)
           dbugprinttok(idtok);
           dbugprinttok(consttok);
         };
-     
      SYMBOL typesym = consttok->symtype;
      SYMBOL sym = insertsym(idtok->stringval);
      sym->kind = CONSTSYM;
@@ -660,6 +676,47 @@ void  instvars(TOKEN idlist, TOKEN typetok)
         };
   }
 
+/* insttype will install a type name in symbol table.
+   typetok is a token containing symbol table pointers. */
+void  insttype(TOKEN typename, TOKEN typetok)
+  { SYMBOL sym = insertsym(typename->stringval);
+    /* TODO symentry should be type structure which is sym->linked to its field */
+    sym->dataype = typetok->symentry;
+    sym->size = typetok->symtype->size;
+  }
+
+/* instrec will install a record definition.  Each token in the linked list
+   argstok has a pointer its type.  rectok is just a trash token to be
+   used to return the result in its symtype */
+TOKEN instrec(TOKEN rectok, TOKEN argstok)
+  { rectok->link = argstok;
+    int size = 0;
+    TOKEN arg = argstok;
+    while (arg)
+       { size += arg->symtype->size;
+         arg = arg->link;
+       }
+    SYMBOL sym = symalloc();
+    sym->kind = RECORDSYM;
+    sym->datatype = NULL /* TODO check symtab.txt for Record and other TODOs */
+    rectok->symtype = sym;
+    return rectok;
+  }
+
+/* instfields will install type in a list idlist of field name tokens:
+   re, im: real    put the pointer to REAL in the RE, IM tokens.
+   typetok is a token whose symtype is a symbol table pointer.
+   Note that nconc() can be used to combine these lists after instrec() */
+TOKEN instfields(TOKEN idlist, TOKEN typetok)
+  { SYMBOL typesym = typetok->symtype;
+    TOKEN tokid = idlist;
+    while (tokid)
+       { tokid->symtype = typetok->symtype;
+         tokid = tokid->link;
+       }
+    return idlist;
+  }
+
 /* makeplus makes a + operator.
    tok (if not NULL) is a (now) unused token that is recycled. */
 TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
@@ -675,11 +732,9 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
 
 /* mulint multiplies expression exp by integer n */
 TOKEN mulint(TOKEN exp, int n)
-  {  if (exp->basicdt == INTEGER)
-        { exp->intval *= n; }
-     if (exp->basicdt == REAL)
-        { exp->realval *= n; }
-     return exp;
+  { if (exp->basicdt == INTEGER) exp->intval *= n;
+    if (exp->basicdt == REAL) exp->realval *= n;
+    return exp;
   }
 
 void yyerror (char const *s)
