@@ -71,13 +71,13 @@ TOKEN parseresult;
 program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
                       { parseresult = makeprogram($2, $4, $7); }
                 ;
-lblock          : LABEL numlist SEMICOLON cblock
+lblock          : LABEL numlist SEMICOLON cblock /* TODO */
                 | cblock
                 ;
-numlist         : NUMBER COMMA numlist
-                | NUMBER
+numlist         : NUMBER COMMA numlist           { instlabel($1); }
+                | NUMBER                         { instlabel($1); }
                 ;
-cblock          : CONST cdef_list tblock       { $$ = $3; }
+cblock          : CONST cdef_list tblock         { $$ = $3; }
                 | tblock
                 ;
 cdef_list       : cdef SEMICOLON cdef_list
@@ -97,7 +97,7 @@ tblock          : TYPE tdef_list vblock
 tdef_list       : tdef SEMICOLON tdef_list
                 | tdef SEMICOLON
                 ;
-tdef            : IDENTIFIER EQ type             { $$ = insttype($1, $3); }
+tdef            : IDENTIFIER EQ type             { insttype($1, $3); }
                 ;
 vblock          : VAR varspecs block             { $$ = $3; }
                 | block
@@ -143,7 +143,7 @@ statement_list  : statement SEMICOLON statement_list
                           { $$ = cons($1, $3); }
                 | statement
                 ;
-label           : NUMBER COLON statement
+label           : NUMBER COLON statement         { $$ = dolabel($1, $2, $3); }
                 ;
 endpart         : SEMICOLON statement endpart    { $$ = cons($2, $3); }
                 | END                            { $$ = NULL; }
@@ -199,7 +199,7 @@ expr_list       : expression COMMA expr_list
                 | expression
                 ;        /* delete */            /* TODO may need to flip */
 field_list      : fields SEMICOLON field_list    { $$ = nconc($1, $3); }
-                | fields                         { $$ = nconc(NULL, $1)}
+                | fields                         { $$ = nconc(NULL, $1); }
                 ;
 fields          : idlist COLON type              { $$ = instfields($1, $3); }
                 ;
@@ -232,10 +232,8 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_INSTVARS   64           /* bit to trace instvars */
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
- int labelnumber = 0;  /* sequential counter for internal label numbers */
-
-   /*  Note: you should add to the above values and insert debugging
-       printouts in your routines similar to those that are shown here.     */
+  int labelnumber = 0;  /* sequential counter for internal label numbers */
+  int labels[256];
 
 /* cons links a new item onto the front of a list.  Equivalent to a push.
    (cons 'a '(b c))  =  (a b c)    */
@@ -258,7 +256,6 @@ TOKEN cons(TOKEN item, TOKEN list)           /* add item to front of list */
 TOKEN nconc(TOKEN lista, TOKEN listb)
   { if (lista == NULL) return listb;
     TOKEN a = lista;
-    /* TODO also add a SYMBOL to each tok->symentry and link each sym through sym->link */
     while (a->link != NULL)
        { a = a->link;
        };
@@ -438,14 +435,13 @@ TOKEN makelabel()
 /* dolabel is the action for a label of the form   <number>: <statement>
    tok is a (now) unused token that is recycled. */
 TOKEN dolabel(TOKEN labeltok, TOKEN tok, TOKEN statement)
-  {
-     return NULL;
+  { 
+    return NULL;
   }
 
 /* instlabel installs a user label into the label table */
 void  instlabel (TOKEN num)
-  {
-
+  { labels[labelnumber++] = num->intval;
   }
 
 /* makegoto makes a GOTO operator to go to the specified label.
@@ -680,9 +676,9 @@ void  instvars(TOKEN idlist, TOKEN typetok)
    typetok is a token containing symbol table pointers. */
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
-    /* TODO symentry should be type structure which is sym->linked to its field */
-    sym->dataype = typetok->symentry;
-    sym->size = typetok->symtype->size;
+    /* symentry should be type structure which is sym->linked to its field */
+    sym->datatype = typetok->symentry;
+    sym->size = typetok->symentry->size;
   }
 
 /* instrec will install a record definition.  Each token in the linked list
@@ -692,14 +688,17 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
   { rectok->link = argstok;
     int size = 0;
     TOKEN arg = argstok;
-    while (arg)
+    while (arg->link != NULL)
        { size += arg->symtype->size;
+         arg->symentry->link = arg->link->symentry;
          arg = arg->link;
        }
-    SYMBOL sym = symalloc();
-    sym->kind = RECORDSYM;
-    sym->datatype = NULL /* TODO check symtab.txt for Record and other TODOs */
-    rectok->symtype = sym;
+    size += arg->symtype->size;
+    SYMBOL recordsym = symalloc();
+    recordsym->kind = RECORDSYM;
+    recordsym->datatype = argstok->symentry;
+    recordsym->size = size;
+    rectok->symentry = recordsym;
     return rectok;
   }
 
@@ -708,10 +707,12 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
    typetok is a token whose symtype is a symbol table pointer.
    Note that nconc() can be used to combine these lists after instrec() */
 TOKEN instfields(TOKEN idlist, TOKEN typetok)
-  { SYMBOL typesym = typetok->symtype;
-    TOKEN tokid = idlist;
+  { TOKEN tokid = idlist;
     while (tokid)
        { tokid->symtype = typetok->symtype;
+         SYMBOL sym = symalloc();
+         sym->kind = ARGSYM;
+         tokid->symentry = sym;
          tokid = tokid->link;
        }
     return idlist;
@@ -744,6 +745,7 @@ void yyerror (char const *s)
 
 int main(void)          /*  */
   { int res;
+    memset(labels, 0, sizeof(labels));
     initsyms();
     res = yyparse();
     printst();       /* to shorten, change to:  printstlevel(1);  */
