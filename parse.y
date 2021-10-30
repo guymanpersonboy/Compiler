@@ -109,8 +109,8 @@ vargroup        : idlist COLON type              { instvars($1, $3); }
                 ;
 type            : simpletype
                 | ARRAY LBRACKET simpletype_list RBRACKET OF type
-                | RECORD field_list END          { instrec($1, $2); }
-                | POINT IDENTIFIER
+                | RECORD field_list END          { $$ = instrec($1, $2); }
+                | POINT IDENTIFIER               { $$ = instpoint($1, $2); }
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
                 | LPAREN idlist RPAREN           { $$ = instenum($2); }
@@ -712,6 +712,16 @@ void  insttype(TOKEN typename, TOKEN typetok)
     /* symentry should be type structure which is sym->linked to its field */
     sym->datatype = typetok->symentry;
     sym->size = typetok->symentry->size;
+  }
+
+/* instpoint will install a pointer type in symbol table */
+TOKEN instpoint(TOKEN tok, TOKEN typename)
+  { SYMBOL sym = insertsym(typename->stringval);
+    sym->kind = POINTERSYM;
+    sym->datatype = typename->symtype;
+    sym->size = basicsizes[POINTER];
+    tok->symentry = sym;
+    return tok;
   }
 
 /* instrec will install a record definition.  Each token in the linked list
