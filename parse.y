@@ -113,9 +113,9 @@ type            : simpletype
                 | POINT IDENTIFIER
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
-                | LPAREN idlist RPAREN           /* enum? */
+                | LPAREN idlist RPAREN           { $$ = instenum($2); }
                 | constant DOTDOT constant
-                ; /* $1->symtype returns type */
+                ;
 simpletype_list : simpletype COMMA simpletype_list
                 | simpletype
                 ;
@@ -523,33 +523,33 @@ TOKEN makerepeat(TOKEN tok, TOKEN statements, TOKEN tokb, TOKEN expr)
    tok, tokb and tokc are (now) unused tokens that are recycled. */
 TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
               TOKEN tokc, TOKEN statement)
-  {  if (sign > 0)
-        { makeprogn(tok, asg);
-          TOKEN tok1 = copytok(asg->operands);
-          TOKEN tok2 = copytok(asg->operands);
-          TOKEN toklabel = makelabel();
-          asg->link = toklabel;
-          /* tokb becomes if statement with goto */
-          toklabel->link = tokb;
-          TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
-          /* tokc becomes progn containing thenpart and i++ and goto */
-          makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
-          statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
-          statement->link->link = makegoto(labelnumber - 1);
-        };
-  /* else
-        { TODO change sign in function call and implement downto
-        } */
-     if (DEBUG & DB_MAKEFOR)
-        { printf("\nmakefor\n");
-          dbugprinttok(tok);
-          dbugprinttok(asg);
-          dbugprinttok(tokb);
-          dbugprinttok(endexpr);
-          dbugprinttok(tokc);
-          dbugprinttok(statement);
-        };
-     return tok;
+  { if (sign > 0)
+       { makeprogn(tok, asg);
+         TOKEN tok1 = copytok(asg->operands);
+         TOKEN tok2 = copytok(asg->operands);
+         TOKEN toklabel = makelabel();
+         asg->link = toklabel;
+         /* tokb becomes if statement with goto */
+         toklabel->link = tokb;
+         TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
+         /* tokc becomes progn containing thenpart and i++ and goto */
+         makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
+         statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
+         statement->link->link = makegoto(labelnumber - 1);
+       };
+ /* else
+      { TODO change sign in function call and implement downto
+      } */
+    if (DEBUG & DB_MAKEFOR)
+       { printf("\nmakefor\n");
+         dbugprinttok(tok);
+         dbugprinttok(asg);
+         dbugprinttok(tokb);
+         dbugprinttok(endexpr);
+         dbugprinttok(tokc);
+         dbugprinttok(statement);
+       };
+    return tok;
   }
 
 /* findid finds an identifier in the symbol table, sets up symbol table
@@ -616,6 +616,38 @@ void  instconst(TOKEN idtok, TOKEN consttok)
         };
   }
 
+/* makesubrange makes a SUBRANGE symbol table entry, puts the pointer to it
+   into tok, and returns tok. */
+TOKEN makesubrange(TOKEN tok, int low, int high)
+  { SYMBOL sym = insertsym(tok->stringval);
+    sym->kind = SUBRANGE;
+    sym->basicdt = INTEGER;
+    sym->size = basicsizes[INTEGER];
+    sym->lowbound = low;
+    sym->highbound = high;
+    tok->symentry = sym;
+    return tok;
+  }
+
+/* instenum installs an enumerated subrange in the symbol table,
+   e.g., type color = (red, white, blue)
+   by calling makesubrange and returning the token it returns. */
+TOKEN instenum(TOKEN idlist)
+  { TOKEN tokid = idlist;
+    int high = 0;
+    while (tokid)
+       { SYMBOL sym = insertsym(tokid->stringval);
+         sym->kind = BASICTYPE;
+         sym->basicdt = INTEGER;
+         sym->size = basicsizes[INTEGER];
+         tokid->symtype = sym;
+         tokid = tokid->link;
+         high++;
+       };
+    /* TODO name conflict in symbol table? */
+    return makesubrange(idlist, 0, high);
+  }
+
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
@@ -676,6 +708,7 @@ void  instvars(TOKEN idlist, TOKEN typetok)
    typetok is a token containing symbol table pointers. */
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
+    sym->kind = TYPESYM;
     /* symentry should be type structure which is sym->linked to its field */
     sym->datatype = typetok->symentry;
     sym->size = typetok->symentry->size;
