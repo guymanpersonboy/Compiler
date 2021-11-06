@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
 #include <ctype.h>
 #include "token.h"
 #include "lexan.h"
@@ -109,12 +110,13 @@ vargroup        : idlist COLON type              { instvars($1, $3); }
                 ;
 type            : simpletype
                 | ARRAY LBRACKET simpletype_list RBRACKET OF type
+                          { $$ = instarray($3, $6); }
                 | RECORD field_list END          { $$ = instrec($1, $2); }
                 | POINT IDENTIFIER               { $$ = instpoint($1, $2); }
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
                 | LPAREN idlist RPAREN           { $$ = instenum($2); }
-                | constant DOTDOT constant
+                | constant DOTDOT constant       { $$ = makesubrange($2, $1->intval, $3->intval); }
                 ;
 simpletype_list : simpletype COMMA simpletype_list
                 | simpletype
@@ -811,8 +813,18 @@ TOKEN dopoint(TOKEN var, TOKEN tok);
 /* instarray installs an array declaration into the symbol table.
    bounds points to a SUBRANGE symbol table entry.
    The symbol table pointer is returned in token typetok. */
-TOKEN instarray(TOKEN bounds, TOKEN typetok);
-//     assert(bounds->symtype->kind == SUBRANGE );
+TOKEN instarray(TOKEN bounds, TOKEN typetok)
+  { assert(bounds->symtype->kind == SUBRANGE);
+    SYMBOL sym = symalloc();
+    sym->kind = ARRAYSYM;
+    sym->datatype = typetok->symtype;
+    SYMBOL typesym = bounds->symtype;
+    sym->size = typesym->highbound - typesym->lowbound + 1;
+    sym->lowbound = typesym->lowbound;
+    sym->highbound = typesym->highbound;
+    typetok->symtype = sym;
+    return typetok;
+  }
 
 void yyerror (char const *s)
 {
