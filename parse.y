@@ -230,6 +230,7 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_INSTCONST  16           /* bit to trace instconst */
 #define DB_FINDTYPE   32           /* bit to trace findtype */
 #define DB_INSTVARS   64           /* bit to trace instvars */
+#define DB_INSTPOINT  64           /* bit to trace instpoint */
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
   int labelnumber = 0;  /* sequential counter for internal label numbers */
@@ -619,13 +620,13 @@ void  instconst(TOKEN idtok, TOKEN consttok)
 /* makesubrange makes a SUBRANGE symbol table entry, puts the pointer to it
    into tok, and returns tok. */
 TOKEN makesubrange(TOKEN tok, int low, int high)
-  { SYMBOL sym = insertsym(tok->stringval);
+  { SYMBOL sym = symalloc();
     sym->kind = SUBRANGE;
     sym->basicdt = INTEGER;
     sym->size = basicsizes[INTEGER];
     sym->lowbound = low;
     sym->highbound = high;
-    tok->symentry = sym;
+    tok->symtype = sym;
     return tok;
   }
 
@@ -709,9 +710,8 @@ void  instvars(TOKEN idlist, TOKEN typetok)
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
     sym->kind = TYPESYM;
-    /* symentry should be type structure which is sym->linked to its field */
-    sym->datatype = typetok->symentry;
-    sym->size = typetok->symentry->size;
+    sym->datatype = typetok->symtype;
+    sym->size = typetok->symtype->size;
   }
 
 /* instpoint will install a pointer type in symbol table */
@@ -720,7 +720,12 @@ TOKEN instpoint(TOKEN tok, TOKEN typename)
     sym->kind = POINTERSYM;
     sym->datatype = typename->symtype;
     sym->size = basicsizes[POINTER];
-    tok->symentry = sym;
+    tok->symtype = sym;
+    if (DEBUG & DB_INSTPOINT) {
+       printf("instpoint\n");
+       dbugprinttok(tok);
+       dbugprinttok(typename);
+    }
     return tok;
   }
 
@@ -733,15 +738,14 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
     TOKEN arg = argstok;
     while (arg->link != NULL)
        { size += arg->symtype->size;
-         arg->symentry->link = arg->link->symentry;
          arg = arg->link;
        }
     size += arg->symtype->size;
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
-    recordsym->datatype = argstok->symentry;
+    recordsym->datatype = argstok->symtype;
     recordsym->size = size;
-    rectok->symentry = recordsym;
+    rectok->symtype = recordsym;
     return rectok;
   }
 
@@ -753,6 +757,7 @@ TOKEN instfields(TOKEN idlist, TOKEN typetok)
   { TOKEN tokid = idlist;
     while (tokid)
        { tokid->symtype = typetok->symtype;
+         // TODO dont need this sym at all?
          SYMBOL sym = symalloc();
          sym->kind = ARGSYM;
          tokid->symentry = sym;
@@ -780,6 +785,34 @@ TOKEN mulint(TOKEN exp, int n)
     if (exp->basicdt == REAL) exp->realval *= n;
     return exp;
   }
+
+/* makearef makes an array reference operation.
+   off is be an integer constant token
+   tok (if not NULL) is a (now) unused token that is recycled. */
+TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok);
+
+/* reducedot handles a record reference.
+   dot is a (now) unused token that is recycled. */
+TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field);
+// assert( var->symtype->kind == RECORDSYM );
+
+/* arrayref processes an array reference a[i]
+   subs is a list of subscript expressions.
+   tok and tokb are (now) unused tokens that are recycled. */
+TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
+// assert( arr->symtype->kind == ARRAYSYM );
+
+/* dopoint handles a ^ operator.  john^ becomes (^ john) with type record
+   tok is a (now) unused token that is recycled. */
+TOKEN dopoint(TOKEN var, TOKEN tok);
+//     assert( var->symtype->kind == POINTERSYM );
+//     assert( var->symtype->datatype->kind == TYPESYM );
+
+/* instarray installs an array declaration into the symbol table.
+   bounds points to a SUBRANGE symbol table entry.
+   The symbol table pointer is returned in token typetok. */
+TOKEN instarray(TOKEN bounds, TOKEN typetok);
+//     assert(bounds->symtype->kind == SUBRANGE );
 
 void yyerror (char const *s)
 {
