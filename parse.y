@@ -33,6 +33,7 @@
 #include <string.h>
 #include <math.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <ctype.h>
 #include "token.h"
 #include "lexan.h"
@@ -221,18 +222,19 @@ sign            : PLUS                           { $$ = $1; }
    are working.
   */
 
-#define DEBUG          0           /* set bits here for debugging, 0 = off  */
+#define DEBUG         32           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       2           /* bit to trace binop */
 #define DB_MAKEIF      4           /* bit to trace makeif */
-#define DB_MAKEPROGN   4           /* bit to trace makeprogn */
-#define DB_MAKEPROGRAM 8           /* bit to trace makeprogram */
-#define DB_MAKEFOR     8           /* bit to trace makefor */
-#define DB_FINDID     16           /* bit to trace findid */
-#define DB_INSTCONST  16           /* bit to trace instconst */
-#define DB_FINDTYPE   32           /* bit to trace findtype */
-#define DB_INSTVARS   32           /* bit to trace instvars */
-#define DB_INSTPOINT  64           /* bit to trace instpoint */
+#define DB_MAKEPROGRAM 4           /* bit to trace makeprogram */
+#define DB_MAKEFOR     4           /* bit to trace makefor */
+#define DB_FINDID      8           /* bit to trace findid */
+#define DB_INSTCONST   8           /* bit to trace instconst */
+#define DB_FINDTYPE   16           /* bit to trace findtype */
+#define DB_INSTVARS   16           /* bit to trace instvars */
+#define DB_INSTPOINT  32           /* bit to trace instpoint */
+#define DB_REDUCEDOT  32
+#define DB_DOPOINT    32
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
   int labelnumber = 0;  /* sequential counter for internal label numbers */
@@ -417,16 +419,11 @@ TOKEN makeif(TOKEN tok, TOKEN exp, TOKEN thenpart, TOKEN elsepart)
 /* makeprogn makes a PROGN operator and links it to the list of statements.
    tok is a (now) unused token that is recycled. */
 TOKEN makeprogn(TOKEN tok, TOKEN statements)
-  {  tok->tokentype = OPERATOR;
-     tok->whichval = PROGNOP;
-     tok->operands = statements;
-     if (DEBUG & DB_MAKEPROGN)
-       { printf("makeprogn\n");
-         dbugprinttok(tok);
-         dbugprinttok(statements);
-       };
-     return tok;
-   }
+  { tok->tokentype = OPERATOR;
+    tok->whichval = PROGNOP;
+    tok->operands = statements;
+    return tok;
+  }
 
 /* makelabel makes a new label, using labelnumber++ */
 TOKEN makelabel()
@@ -438,8 +435,12 @@ TOKEN makelabel()
 /* dolabel is the action for a label of the form   <number>: <statement>
    tok is a (now) unused token that is recycled. */
 TOKEN dolabel(TOKEN labeltok, TOKEN tok, TOKEN statement)
-  { 
-    return NULL;
+  { instlabel(labeltok);
+    labeltok->tokentype = OPERATOR;
+    labeltok->whichval = LABELOP;
+    labeltok->operands = makeintc(labelnumber);
+    labeltok->link = statement;
+    return makeprogn(tok, labeltok);
   }
 
 /* instlabel installs a user label into the label table */
@@ -600,22 +601,21 @@ void  instconst(TOKEN idtok, TOKEN consttok)
      SYMBOL typesym = consttok->symtype;
      SYMBOL sym = insertsym(idtok->stringval);
      sym->kind = CONSTSYM;
-     sym->size = typesym->size;
      sym->datatype = typesym;
+     sym->size = typesym->size;
      sym->basicdt = typesym->basicdt;
      switch (sym->basicdt)
         { case INTEGER:
+          case BOOLETYPE:
             sym->constval.intnum = consttok->intval;
             break;
           case REAL:
+          case POINTER:
             sym->constval.realnum = consttok->realval;
             break;
           case STRINGTYPE:
             strcpy(sym->constval.stringconst, consttok->stringval);
             break;
-          case BOOLETYPE:
-          case POINTER:
-            printf("TODO\n\n");
         };
   }
 
@@ -640,10 +640,12 @@ TOKEN instenum(TOKEN idlist)
     int high = 0;
     while (tokid)
        { SYMBOL sym = insertsym(tokid->stringval);
-         sym->kind = BASICTYPE;
+         sym->kind = CONSTSYM;
          sym->basicdt = INTEGER;
+         sym->datatype = searchst("integer");
          sym->size = basicsizes[INTEGER];
-         tokid->symtype = sym;
+         sym->constval.intnum = high;
+         tokid->symentry = sym;
          tokid = tokid->link;
          high++;
        };
@@ -810,11 +812,35 @@ TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok)
 /* reducedot handles a record reference.
    dot is a (now) unused token that is recycled. */
 TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
-  { assert( var->symtype->kind == RECORDSYM );
+  { if (DEBUG & DB_REDUCEDOT)
+       { printf("reducedot\n");
+         dbugprinttok(var);
+         dbugprinttok(dot);
+         dbugprinttok(field);
+       };
+    int offset = 0;
+    bool reduce = false;
+    if (var->whichval == AREFOP)
+       { var = var->operands;
+         offset = var->link->intval;
+       };
+    assert( var->symtype->kind == RECORDSYM );
     SYMBOL tok = var->symtype->datatype->datatype;
-    while (strcmp(tok->namestring, field->stringval))
-       { tok = tok->link; };
-    TOKEN tokoff = fillintc(field, tok->offset);
+    while (strncmp(tok->namestring, field->stringval, 16))
+       { tok = tok->link;
+         offset += tok->offset;
+         if (tok->offset != offset)
+            { reduce = true;
+              break;
+            };
+       };
+    if (tok->offset == offset && reduce)
+       { tok = tok->datatype->datatype->datatype;
+         while (strncmp(tok->namestring, field->stringval, 16))
+            { tok = tok->link;
+            };
+       };
+    TOKEN tokoff = fillintc(field, offset + tok->offset);
     return makearef(var, tokoff, dot);
   }
 
@@ -829,6 +855,11 @@ TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
 TOKEN dopoint(TOKEN var, TOKEN tok)
   { assert( var->symtype->kind == POINTERSYM );
     assert( var->symtype->datatype->kind == TYPESYM );
+    if (DEBUG & DB_DOPOINT)
+       { printf("dopoint\n");
+         dbugprinttok(var);
+         dbugprinttok(tok);
+       }
     SYMBOL typesym = searchst(var->symtype->datatype->namestring);
     tok->symtype = typesym->link->link;
     tok->operands = var;
