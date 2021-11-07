@@ -192,8 +192,8 @@ unsigned_constant : NUMBER                       { $$ = $1; }
                 ;
 variable        : IDENTIFIER                     { $$ = findid($1); }
                 | variable LBRACKET expr_list RBRACKET
-                | variable DOT IDENTIFIER
-                | variable POINT
+                | variable DOT IDENTIFIER        { $$ = reducedot($1, $2, $3); }
+                | variable POINT                 { $$ = dopoint($1, $2); }
                 ;
 funcall         : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($4, $1, $3); }
                 ;
@@ -231,7 +231,7 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_FINDID     16           /* bit to trace findid */
 #define DB_INSTCONST  16           /* bit to trace instconst */
 #define DB_FINDTYPE   32           /* bit to trace findtype */
-#define DB_INSTVARS   64           /* bit to trace instvars */
+#define DB_INSTVARS   32           /* bit to trace instvars */
 #define DB_INSTPOINT  64           /* bit to trace instpoint */
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
@@ -711,8 +711,9 @@ void  instvars(TOKEN idlist, TOKEN typetok)
    typetok is a token containing symbol table pointers. */
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
-    sym->kind = TYPESYM;
+    sym->kind = typetok->symtype->kind;
     sym->datatype = typetok->symtype;
+    sym->datatype->kind = TYPESYM;
     sym->size = typetok->symtype->size;
   }
 
@@ -735,17 +736,21 @@ TOKEN instpoint(TOKEN tok, TOKEN typename)
    argstok has a pointer its type.  rectok is just a trash token to be
    used to return the result in its symtype */
 TOKEN instrec(TOKEN rectok, TOKEN argstok)
-  { rectok->link = argstok;
-    int size = 0;
-    TOKEN arg = argstok;
-    while (arg->link != NULL)
-       { size += arg->symtype->size;
-         arg = arg->link;
+  { int size = 0;
+    TOKEN tok = argstok;
+    while (tok->link != NULL)
+       { strncpy(tok->symentry->namestring, tok->stringval, 16);
+         tok->symentry->offset = size;
+         size += tok->symentry->size;
+         tok->symentry->link = tok->link->symentry;
+         tok = tok->link;
        }
-    size += arg->symtype->size;
+    strncpy(tok->symentry->namestring, tok->stringval, 16);
+    tok->symentry->offset = size;
+    size += tok->symentry->size;
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
-    recordsym->datatype = argstok->symtype;
+    recordsym->datatype = argstok->symentry;
     recordsym->size = size;
     rectok->symtype = recordsym;
     return rectok;
@@ -756,12 +761,13 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
    typetok is a token whose symtype is a symbol table pointer.
    Note that nconc() can be used to combine these lists after instrec() */
 TOKEN instfields(TOKEN idlist, TOKEN typetok)
-  { TOKEN tokid = idlist;
+  { SYMBOL typesym = typetok->symtype;
+    TOKEN tokid = idlist;
     while (tokid)
-       { tokid->symtype = typetok->symtype;
-         // TODO dont need this sym at all?
-         SYMBOL sym = symalloc();
+       { SYMBOL sym = symalloc();
          sym->kind = ARGSYM;
+         sym->datatype = typesym;
+         sym->size = typesym->size;
          tokid->symentry = sym;
          tokid = tokid->link;
        }
@@ -771,14 +777,14 @@ TOKEN instfields(TOKEN idlist, TOKEN typetok)
 /* makeplus makes a + operator.
    tok (if not NULL) is a (now) unused token that is recycled. */
 TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
-  {  tok = (tok) ? tok : (TOKEN) talloc();
-     tok->tokentype = OPERATOR;
-     tok->whichval = PLUSOP;
-     TOKEN tokas = makeop(ASSIGNOP);
-     tokas->operands = lhs;
-     TOKEN tok1 = copytok(lhs);
-     lhs->link = binop(tok, tok1, rhs);
-     return tokas;
+  { tok = (tok) ? tok : (TOKEN) talloc();
+    tok->tokentype = OPERATOR;
+    tok->whichval = PLUSOP;
+    TOKEN tokas = makeop(ASSIGNOP);
+    tokas->operands = lhs;
+    TOKEN tok1 = copytok(lhs);
+    lhs->link = binop(tok, tok1, rhs);
+    return tokas;
   }
 
 /* mulint multiplies expression exp by integer n */
@@ -791,12 +797,26 @@ TOKEN mulint(TOKEN exp, int n)
 /* makearef makes an array reference operation.
    off is be an integer constant token
    tok (if not NULL) is a (now) unused token that is recycled. */
-TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok);
+TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok)
+  { tok = (tok) ? tok : (TOKEN) talloc();
+    tok->tokentype = OPERATOR;
+    tok->whichval = AREFOP;
+    // TODO may need to flip
+    tok->operands = var;
+    var->link = off;
+    return tok;
+  }
 
 /* reducedot handles a record reference.
    dot is a (now) unused token that is recycled. */
-TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field);
-// assert( var->symtype->kind == RECORDSYM );
+TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
+  { assert( var->symtype->kind == RECORDSYM );
+    SYMBOL tok = var->symtype->datatype->datatype;
+    while (strcmp(tok->namestring, field->stringval))
+       { tok = tok->link; };
+    TOKEN tokoff = fillintc(field, tok->offset);
+    return makearef(var, tokoff, dot);
+  }
 
 /* arrayref processes an array reference a[i]
    subs is a list of subscript expressions.
@@ -806,15 +826,20 @@ TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
 
 /* dopoint handles a ^ operator.  john^ becomes (^ john) with type record
    tok is a (now) unused token that is recycled. */
-TOKEN dopoint(TOKEN var, TOKEN tok);
-//     assert( var->symtype->kind == POINTERSYM );
-//     assert( var->symtype->datatype->kind == TYPESYM );
+TOKEN dopoint(TOKEN var, TOKEN tok)
+  { assert( var->symtype->kind == POINTERSYM );
+    assert( var->symtype->datatype->kind == TYPESYM );
+    SYMBOL typesym = searchst(var->symtype->datatype->namestring);
+    tok->symtype = typesym->link->link;
+    tok->operands = var;
+    return tok;
+  }
 
 /* instarray installs an array declaration into the symbol table.
    bounds points to a SUBRANGE symbol table entry.
    The symbol table pointer is returned in token typetok. */
 TOKEN instarray(TOKEN bounds, TOKEN typetok)
-  { assert(bounds->symtype->kind == SUBRANGE);
+  { assert( bounds->symtype->kind == SUBRANGE );
     SYMBOL sym = symalloc();
     sym->kind = ARRAYSYM;
     sym->datatype = typetok->symtype;
