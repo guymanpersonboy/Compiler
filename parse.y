@@ -43,6 +43,7 @@
 
 static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum);
 static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
+static void setarg(TOKEN tok, int *size, int padding);
 
         /* define the type of the Yacc stack element to be TOKEN */
 
@@ -739,23 +740,36 @@ TOKEN instpoint(TOKEN tok, TOKEN typename)
    used to return the result in its symtype */
 TOKEN instrec(TOKEN rectok, TOKEN argstok)
   { int size = 0;
+    int padding = 0;
     TOKEN tok = argstok;
     while (tok->link != NULL)
-       { strncpy(tok->symentry->namestring, tok->stringval, 16);
-         tok->symentry->offset = size;
-         size += tok->symentry->size;
+       { setarg(tok, &size, padding);
+        //  printf("link %d ", tok->link->symentry->size);
+        //  printf("size %d ", size);
+        //  printf("%d", tok->symentry->offset);
+        //  dbugprinttok(tok);
+         padding = size % 8;
+         if (tok->link->symentry->size % 8 != 0)
+            { padding = 0; };
          tok->symentry->link = tok->link->symentry;
          tok = tok->link;
-       }
-    strncpy(tok->symentry->namestring, tok->stringval, 16);
-    tok->symentry->offset = size;
-    size += tok->symentry->size;
+       };
+    setarg(tok, &size, padding);
+    // printf("\tsize %d ", size);
+    // printf("%d", tok->symentry->offset);
+    // dbugprinttok(tok);
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
     recordsym->datatype = argstok->symentry;
     recordsym->size = size;
     rectok->symtype = recordsym;
     return rectok;
+  }
+
+static void setarg(TOKEN tok, int *size, int padding)
+  { strncpy(tok->symentry->namestring, tok->stringval, 16);
+    tok->symentry->offset = *size + padding;
+    *size += tok->symentry->size + padding;
   }
 
 /* instfields will install type in a list idlist of field name tokens:
