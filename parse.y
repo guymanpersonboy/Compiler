@@ -112,13 +112,14 @@ vargroup        : idlist COLON type              { instvars($1, $3); }
                 ;
 type            : simpletype
                 | ARRAY LBRACKET simpletype_list RBRACKET OF type
-                          { $$ = instarray($3, $6); }
+                                                 { $$ = instarray($3, $6); }
                 | RECORD field_list END          { $$ = instrec($1, $2); }
                 | POINT IDENTIFIER               { $$ = instpoint($1, $2); }
                 ;
 simpletype      : IDENTIFIER                     { $$ = findtype($1); }
                 | LPAREN idlist RPAREN           { $$ = instenum($2); }
-                | constant DOTDOT constant       { $$ = makesubrange($2, $1->intval, $3->intval); }
+                | constant DOTDOT constant       
+                          { $$ = makesubrange($2, $1->intval, $3->intval); }
                 ;
 simpletype_list : simpletype COMMA simpletype_list
                 | simpletype
@@ -144,7 +145,7 @@ statement       : BEGINBEGIN statement endpart
 assignment      : variable ASSIGN expression     { $$ = binop($2, $1, $3); }
                 ;
 statement_list  : statement SEMICOLON statement_list
-                          { $$ = cons($1, $3); }
+                                                 { $$ = cons($1, $3); }
                 | statement
                 ;
 label           : NUMBER COLON statement         { $$ = dolabel($1, $2, $3); }
@@ -194,6 +195,7 @@ unsigned_constant : NUMBER                       { $$ = $1; }
                 ;
 variable        : IDENTIFIER                     { $$ = findid($1); }
                 | variable LBRACKET expr_list RBRACKET
+                                                 { $$ = arrayref($1, $2, $3, $4); }
                 | variable DOT IDENTIFIER        { $$ = reducedot($1, $2, $3); }
                 | variable POINT                 { $$ = dopoint($1, $2); }
                 ;
@@ -201,7 +203,7 @@ funcall         : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($4, $1,
                 ;
 expr_list       : expression COMMA expr_list
                 | expression
-                ;        /* delete */            /* TODO may need to flip */
+                ;
 field_list      : fields SEMICOLON field_list    { $$ = nconc($1, $3); }
                 | fields                         { $$ = nconc(NULL, $1); }
                 ;
@@ -748,8 +750,8 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
         //  printf("size %d ", size);
         //  printf("%d", tok->symentry->offset);
         //  dbugprinttok(tok);
-         padding = size % 8;
-         if (tok->link->symentry->size % 8 != 0)
+         padding = size % RECORDALIGN;
+         if (tok->link->symentry->size % RECORDALIGN != 0)
             { padding = 0; };
          tok->symentry->link = tok->link->symentry;
          tok = tok->link;
@@ -803,10 +805,17 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
     return tokas;
   }
 
+/* addoffs adds offset, off, to an aref expression, exp */
+TOKEN addoffs(TOKEN exp, TOKEN off)
+  { /* TODO use function if needed */
+    return exp;
+  }
+
 /* mulint multiplies expression exp by integer n */
 TOKEN mulint(TOKEN exp, int n)
-  { if (exp->basicdt == INTEGER) exp->intval *= n;
-    if (exp->basicdt == REAL) exp->realval *= n;
+  { int dt = exp->basicdt;
+    if (dt == INTEGER || dt == BOOLETYPE) exp->intval *= n;
+    if (dt == REAL || dt == POINTER) exp->realval *= n;
     return exp;
   }
 
@@ -836,13 +845,14 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
     bool reduce = false;
     if (var->whichval == AREFOP)
        { var = var->operands;
-         offset = var->link->intval;
+        //  offset = var->link->intval;
        };
     assert( var->symtype->kind == RECORDSYM );
     SYMBOL tok = var->symtype->datatype->datatype;
     while (strncmp(tok->namestring, field->stringval, 16))
        { tok = tok->link;
          offset += tok->offset;
+         /* mark if the field is in record and might need to reduce further */
          if (tok->offset != offset)
             { reduce = true;
               break;
@@ -861,19 +871,30 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
 /* arrayref processes an array reference a[i]
    subs is a list of subscript expressions.
    tok and tokb are (now) unused tokens that are recycled. */
-TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
-// assert( arr->symtype->kind == ARRAYSYM );
+TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
+  { assert( arr->symtype->kind == ARRAYSYM );
+    int offset = 0;
+    SYMBOL typesym = arr->symtype;
+    if (subs->tokentype == NUMBERTOK)
+       { offset = typesym->offset * subs->intval; }
+    // else /* IDENTIFIERTOK */
+    //    {
+
+    //    };
+    return makearef(arr, fillintc(tokb, offset), tok);
+  }
 
 /* dopoint handles a ^ operator.  john^ becomes (^ john) with type record
    tok is a (now) unused token that is recycled. */
 TOKEN dopoint(TOKEN var, TOKEN tok)
-  { assert( var->symtype->kind == POINTERSYM );
-    assert( var->symtype->datatype->kind == TYPESYM );
-    if (DEBUG & DB_DOPOINT)
+  { if (DEBUG & DB_DOPOINT)
        { printf("dopoint\n");
          dbugprinttok(var);
          dbugprinttok(tok);
        }
+    if (var->whichval == AREFOP) return var;
+    assert( var->symtype->kind == POINTERSYM );
+    assert( var->symtype->datatype->kind == TYPESYM );
     SYMBOL typesym = searchst(var->symtype->datatype->namestring);
     tok->symtype = typesym->link->link;
     tok->operands = var;
@@ -890,6 +911,7 @@ TOKEN instarray(TOKEN bounds, TOKEN typetok)
     sym->datatype = typetok->symtype;
     SYMBOL typesym = bounds->symtype;
     sym->size = typesym->highbound - typesym->lowbound + 1;
+    sym->offset = typetok->symtype->size;
     sym->lowbound = typesym->lowbound;
     sym->highbound = typesym->highbound;
     typetok->symtype = sym;
