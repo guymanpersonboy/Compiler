@@ -74,7 +74,7 @@ TOKEN parseresult;
 program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
                       { parseresult = makeprogram($2, $4, $7); }
                 ;
-lblock          : LABEL numlist SEMICOLON cblock /* TODO */
+lblock          : LABEL numlist SEMICOLON cblock { $$ = $3; }
                 | cblock
                 ;
 numlist         : NUMBER COMMA numlist           { instlabel($1); }
@@ -88,13 +88,13 @@ cdef_list       : cdef SEMICOLON cdef_list
                 ;
 cdef            : IDENTIFIER EQ constant         { instconst($1, $3); }
                 ;
-constant        : sign IDENTIFIER                /* TODO */
+constant        : sign IDENTIFIER                { $$ = unaryop($1, findtype($2)); }
                 | IDENTIFIER                     { $$ = findtype($1); }
                 | sign NUMBER                    { $$ = mulint($2, $1->intval); }
                 | NUMBER                         { $$ = findtype($1); }
                 | STRING                         { $$ = $1; }
                 ;
-tblock          : TYPE tdef_list vblock
+tblock          : TYPE tdef_list vblock          { $$ = $3; }
                 | vblock
                 ;
 tdef_list       : tdef SEMICOLON tdef_list
@@ -139,7 +139,7 @@ statement       : BEGINBEGIN statement endpart
                           { $$ = makerepeat($1, $2, $3, $4); }
                 | FOR assignment TO expression DO statement
                           { $$ = makefor(1, $1, $2, $3, $4, $5, $6);}
-                | GOTO NUMBER
+                | GOTO NUMBER                    { $$ = dogoto($1, $2); }
                 | label
                 ;
 assignment      : variable ASSIGN expression     { $$ = binop($2, $1, $3); }
@@ -225,11 +225,10 @@ sign            : PLUS                           { $$ = $1; }
    are working.
   */
 
-#define DEBUG         32           /* set bits here for debugging, 0 = off  */
+#define DEBUG          0           /* set bits here for debugging, 0 = off  */
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       2           /* bit to trace binop */
 #define DB_MAKEIF      4           /* bit to trace makeif */
-#define DB_MAKEPROGRAM 4           /* bit to trace makeprogram */
 #define DB_MAKEFOR     4           /* bit to trace makefor */
 #define DB_FINDID      8           /* bit to trace findid */
 #define DB_INSTCONST   8           /* bit to trace instconst */
@@ -462,8 +461,8 @@ TOKEN makegoto(int label)
 /* dogoto is the action for a goto statement.
    tok is a (now) unused token that is recycled. */
 TOKEN dogoto(TOKEN tok, TOKEN labeltok)
-  {
-     return NULL;
+  { /* TODO */
+    return NULL;
   }
 
 /* makefuncall makes a FUNCALL operator and links it to the fn and args.
@@ -485,14 +484,6 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
     TOKEN tokprogn = (TOKEN) talloc();
     name->link = makeprogn(tokprogn, args);
     tokprogn->link = statements;
-    if (DEBUG & DB_MAKEPROGRAM)
-      { printf("\nmakeprogram\n");
-        dbugprinttok(tokprogram);
-        dbugprinttok(name);
-        dbugprinttok(tokprogn);
-        dbugprinttok(args);
-        dbugprinttok(statements);
-      };
     return tokprogram;
   }
 
@@ -500,12 +491,12 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
    tok and tokb are (now) unused tokens that are recycled. */
 TOKEN makewhile(TOKEN tok, TOKEN expr, TOKEN tokb, TOKEN statement)
   { TOKEN toklabel = makelabel();
-    TOKEN tokprol = makeprogn(tok, toklabel);
-    TOKEN tokpros = makeprogn(tokb, statement);
+    TOKEN toklab = makeprogn(tok, toklabel);
+    TOKEN tokstat = makeprogn(tokb, statement);
     TOKEN tokif = (TOKEN) talloc();
-    makeif(tokif, expr, tokpros, makegoto(labelnumber - 1));
+    makeif(tokif, expr, tokstat, makegoto(labelnumber - 1));
     toklabel->link = tokif;
-    return tokprol;
+    return toklab;
 
   }
 
@@ -513,14 +504,14 @@ TOKEN makewhile(TOKEN tok, TOKEN expr, TOKEN tokb, TOKEN statement)
    tok and tokb are (now) unused tokens that are recycled. */
 TOKEN makerepeat(TOKEN tok, TOKEN statements, TOKEN tokb, TOKEN expr)
   { TOKEN toklabel = makelabel();
-    TOKEN tokprol = makeprogn(tok, toklabel);
-    TOKEN tokpros = makeprogn(tokb, statements);
-    toklabel->link = tokpros;
+    TOKEN toklab = makeprogn(tok, toklabel);
+    TOKEN tokstat = makeprogn(tokb, statements);
+    toklabel->link = tokstat;
     TOKEN tokif = (TOKEN) talloc();
     TOKEN toknoop = (TOKEN) talloc();
     makeif(tokif, expr, makeprogn(toknoop, NULL), makegoto(labelnumber - 1));
-    tokpros->link = tokif;
-    return tokprol;
+    tokstat->link = tokif;
+    return toklab;
   }
 
 /* makefor makes structures for a for statement.
@@ -576,19 +567,18 @@ TOKEN findid(TOKEN tok) /* the ID token */
      if (sym->kind == CONSTSYM) /* set a constant to its number */
         { switch (sym->basicdt)
           { case INTEGER:
+            case BOOLETYPE:
               tok->tokentype = NUMBERTOK;
               tok->intval = sym->constval.intnum;
               break;
             case REAL:
+            case POINTER:
               tok->tokentype = NUMBERTOK;
               tok->realval = sym->constval.realnum;
               break;
             case STRINGTYPE:
               strcpy(tok->stringval, sym->constval.stringconst);
               break;
-            case BOOLETYPE:
-            case POINTER:
-              printf("TODO\n\n");
           };
         };
      return tok;
@@ -652,8 +642,9 @@ TOKEN instenum(TOKEN idlist)
          tokid = tokid->link;
          high++;
        };
-    /* TODO name conflict in symbol table? */
-    return makesubrange(idlist, 0, high);
+    makesubrange(idlist, 0, high);
+    idlist->symtype->kind = TYPESYM;
+    return idlist;
   }
 
 /* findtype looks up a type name in the symbol table, puts the pointer
@@ -665,10 +656,15 @@ TOKEN findtype(TOKEN tok)
                 tok->symtype = searchst("integer");
                 break;
               case REAL:
+              case POINTER:
                 tok->symtype = searchst("real");
                 break;
-              default:
-                printf("TODO change case %d\n", tok->tokentype);
+              case STRINGTYPE:
+                tok->symtype = searchst("char");
+                break;
+              case BOOLETYPE:
+                tok->symtype = searchst("boolean");
+                break;
             };
        }
     else
@@ -846,6 +842,7 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
     if (var->whichval == AREFOP)
        { var = var->operands;
         //  offset = var->link->intval;
+        if (var->symtype->kind == ARRAYSYM) return var;
        };
     assert( var->symtype->kind == RECORDSYM );
     SYMBOL tok = var->symtype->datatype->datatype;
