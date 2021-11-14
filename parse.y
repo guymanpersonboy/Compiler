@@ -74,7 +74,7 @@ TOKEN parseresult;
 program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
                       { parseresult = makeprogram($2, $4, $7); }
                 ;
-lblock          : LABEL numlist SEMICOLON cblock { $$ = $3; }
+lblock          : LABEL numlist SEMICOLON cblock { $$ = $4; }
                 | cblock
                 ;
 numlist         : NUMBER COMMA numlist           { instlabel($1); }
@@ -240,7 +240,7 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
   int labelnumber = 0;  /* sequential counter for internal label numbers */
-  int labels[256];
+  int labels[64];
 
 /* cons links a new item onto the front of a list.  Equivalent to a push.
    (cons 'a '(b c))  =  (a b c)    */
@@ -461,8 +461,8 @@ TOKEN makegoto(int label)
 /* dogoto is the action for a goto statement.
    tok is a (now) unused token that is recycled. */
 TOKEN dogoto(TOKEN tok, TOKEN labeltok)
-  { /* TODO */
-    return NULL;
+  { tok->operands = labeltok;
+    return tok;
   }
 
 /* makefuncall makes a FUNCALL operator and links it to the fn and args.
@@ -642,9 +642,7 @@ TOKEN instenum(TOKEN idlist)
          tokid = tokid->link;
          high++;
        };
-    makesubrange(idlist, 0, high);
-    idlist->symtype->kind = TYPESYM;
-    return idlist;
+    return makesubrange(idlist, 0, high - 1);;
   }
 
 /* findtype looks up a type name in the symbol table, puts the pointer
@@ -712,10 +710,13 @@ void  instvars(TOKEN idlist, TOKEN typetok)
    typetok is a token containing symbol table pointers. */
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
-    sym->kind = typetok->symtype->kind;
-    sym->datatype = typetok->symtype;
+    SYMBOL typesym = typetok->symtype;
+    sym->kind = typesym->kind;
+    sym->datatype = typesym;
     sym->datatype->kind = TYPESYM;
-    sym->size = typetok->symtype->size;
+    sym->size = typesym->size;
+    sym->lowbound = typesym->lowbound;
+    sym->highbound = typesym->highbound;
   }
 
 /* instpoint will install a pointer type in symbol table */
