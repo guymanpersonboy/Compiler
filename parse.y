@@ -233,10 +233,10 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_FINDID      8           /* bit to trace findid */
 #define DB_INSTCONST   8           /* bit to trace instconst */
 #define DB_FINDTYPE   16           /* bit to trace findtype */
-#define DB_INSTVARS   16           /* bit to trace instvars */
+#define DB_INSTVARS   32           /* bit to trace instvars */
 #define DB_INSTPOINT  32           /* bit to trace instpoint */
 #define DB_REDUCEDOT  32
-#define DB_DOPOINT    32
+#define DB_DOPOINT    64
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
   int labelnumber = 0;  /* sequential counter for internal label numbers */
@@ -461,7 +461,16 @@ TOKEN makegoto(int label)
 /* dogoto is the action for a goto statement.
    tok is a (now) unused token that is recycled. */
 TOKEN dogoto(TOKEN tok, TOKEN labeltok)
-  { tok->operands = labeltok;
+  { tok->tokentype = OPERATOR;
+    tok->whichval = GOTOOP;
+    int i;
+    for (i = 0; i < 64; i++)
+       { if (labels[i] == labeltok->intval)
+            { labeltok->intval = i;
+              break;
+            }
+       }
+    tok->operands = labeltok;
     return tok;
   }
 
@@ -666,7 +675,7 @@ TOKEN findtype(TOKEN tok)
             };
        }
     else
-       { tok->symtype = searchst(tok->stringval); 
+       { tok->symtype = searchst(tok->stringval);
        };
     if (DEBUG & DB_FINDTYPE)
        { printf("findtype\n");
@@ -721,9 +730,9 @@ void  insttype(TOKEN typename, TOKEN typetok)
 
 /* instpoint will install a pointer type in symbol table */
 TOKEN instpoint(TOKEN tok, TOKEN typename)
-  { SYMBOL sym = insertsym(typename->stringval);
+  { SYMBOL sym = symalloc();
     sym->kind = POINTERSYM;
-    sym->datatype = typename->symtype;
+    sym->datatype = makesym(typename->stringval);
     sym->size = basicsizes[POINTER];
     tok->symtype = sym;
     if (DEBUG & DB_INSTPOINT) {
@@ -748,6 +757,7 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
         //  printf("%d", tok->symentry->offset);
         //  dbugprinttok(tok);
          padding = size % RECORDALIGN;
+         /* TODO records/arrays alinged to 16, real/pointers to 8 */
          if (tok->link->symentry->size % RECORDALIGN != 0)
             { padding = 0; };
          tok->symentry->link = tok->link->symentry;
@@ -893,8 +903,7 @@ TOKEN dopoint(TOKEN var, TOKEN tok)
     if (var->whichval == AREFOP) return var;
     assert( var->symtype->kind == POINTERSYM );
     assert( var->symtype->datatype->kind == TYPESYM );
-    SYMBOL typesym = searchst(var->symtype->datatype->namestring);
-    tok->symtype = typesym->link->link;
+    tok->symtype = searchst(var->symtype->datatype->datatype->namestring);
     tok->operands = var;
     return tok;
   }
