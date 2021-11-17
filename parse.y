@@ -44,6 +44,7 @@
 static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum);
 static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void setarg(TOKEN tok, int *size, int padding);
+static int reduce_record(SYMBOL sym, TOKEN field);
 
         /* define the type of the Yacc stack element to be TOKEN */
 
@@ -477,11 +478,18 @@ TOKEN dogoto(TOKEN tok, TOKEN labeltok)
 /* makefuncall makes a FUNCALL operator and links it to the fn and args.
    tok is a (now) unused token that is recycled. */
 TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
-  {  tok->tokentype = OPERATOR;
-     tok->whichval = FUNCALLOP;
-     tok->operands = fn;
-     fn->link = args;
-     return tok;
+  { tok->tokentype = OPERATOR;
+    tok->whichval = FUNCALLOP;
+    tok->operands = fn;
+    if (strncmp(fn->stringval, "new", 16) == 0)
+       { TOKEN tokas = makeop(ASSIGNOP);
+         SYMBOL typesym = searchst(args->symtype->datatype->datatype->namestring);
+         binop(tokas, args, tok);
+         fn->link = makeintc(typesym->size);
+         return tokas;
+       }
+    fn->link = args;
+    return tok;
   }
 
 /* makeprogram makes the tree structures for the top-level program */
@@ -545,7 +553,7 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
          statement->link->link = makegoto(labelnumber - 1);
        };
  /* else
-      { TODO change sign in function call and implement downto
+      { change sign in function call and implement downto
       } */
     if (DEBUG & DB_MAKEFOR)
        { printf("\nmakefor\n");
@@ -849,31 +857,34 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
          dbugprinttok(field);
        };
     int offset = 0;
-    bool reduce = false;
     if (var->whichval == AREFOP)
        { var = var->operands;
         //  offset = var->link->intval;
-        if (var->symtype->kind == ARRAYSYM) return var;
+         if (var->symtype->kind == ARRAYSYM) return var;
        };
     assert( var->symtype->kind == RECORDSYM );
-    SYMBOL tok = var->symtype->datatype->datatype;
-    while (strncmp(tok->namestring, field->stringval, 16))
-       { tok = tok->link;
-         offset += tok->offset;
-         /* mark if the field is in record and might need to reduce further */
-         if (tok->offset != offset)
-            { reduce = true;
-              break;
+    SYMBOL sym = var->symtype->datatype->datatype;
+    while (strncmp(sym->namestring, field->stringval, 16))
+       { if (sym->datatype->kind == RECORDSYM)
+            { int result = reduce_record(sym->datatype->datatype->datatype, field);
+              if (result != -1)
+                 { offset = sym->offset + result;
+                   break;
+                 }
             };
+         sym = sym->link;
+         offset = sym->offset;
        };
-    if (tok->offset == offset && reduce)
-       { tok = tok->datatype->datatype->datatype;
-         while (strncmp(tok->namestring, field->stringval, 16))
-            { tok = tok->link;
-            };
-       };
-    TOKEN tokoff = fillintc(field, offset + tok->offset);
+    TOKEN tokoff = fillintc(field, offset);
     return makearef(var, tokoff, dot);
+  }
+
+static int reduce_record(SYMBOL sym, TOKEN field)
+  { while (sym && strncmp(sym->namestring, field->stringval, 16))
+       { sym = sym->link;
+       }
+    if (sym) return sym->offset;
+    return -1;
   }
 
 /* arrayref processes an array reference a[i]
