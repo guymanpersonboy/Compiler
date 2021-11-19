@@ -41,9 +41,10 @@
 #include "parse.h"
 #include "pprint.h"
 
-static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum);
+static void binop_fix(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void setarg(TOKEN tok, int *size, int padding);
+static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field);
 static int reduce_record(SYMBOL sym, TOKEN field);
 
         /* define the type of the Yacc stack element to be TOKEN */
@@ -288,11 +289,11 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
     /* type propagation */
     op->basicdt = lhs->basicdt || rhs->basicdt;
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
-       { binop_assign(op, lhs, rhs, FIXOP);
+       { binop_fix(op, lhs, rhs);
        }
     else if (op->whichval == ASSIGNOP && lhs->basicdt == REAL && rhs->basicdt == INTEGER)
-       { binop_assign(op, lhs, rhs, FLOATOP);
-       }
+       { makefloat(rhs);
+       } /* TODO add < I X pg 141 ie compare ops) */
     else if (lhs->basicdt == INTEGER && rhs->basicdt == REAL)
        { op->basicdt = REAL;
          if (lhs->symentry && lhs->symentry->kind == CONSTSYM)
@@ -308,7 +309,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
               return op;
             };
          binop_extra(op, rhs, lhs); /* lhs and rhs flipped */
-       };
+       }; /* remove ^ not necessary? (pg 141)  */
     if (DEBUG & DB_BINOP)
        { printf("binop\n");
          dbugprinttok(op);
@@ -319,8 +320,8 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
   }
 
 /* binop assign coercion helper */
-static void binop_assign(TOKEN op, TOKEN lhs, TOKEN rhs, int opnum)
-  { TOKEN tokcoer = makeop(opnum);
+static void binop_fix(TOKEN op, TOKEN lhs, TOKEN rhs)
+  { TOKEN tokcoer = makeop(FIXOP);
     tokcoer->basicdt = lhs->basicdt;
     lhs->link = tokcoer;
     tokcoer->operands = rhs;
@@ -857,13 +858,51 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
          dbugprinttok(field);
        };
     int offset = 0;
+    TOKEN varid = var;
+    TOKEN varog = var;
+    if (var->whichval == POINTEROP && var->operands->whichval == AREFOP) var = var->operands;
     if (var->whichval == AREFOP)
-       { var = var->operands;
-        //  offset = var->link->intval;
-         if (var->symtype->kind == ARRAYSYM) return var;
+       { if (var->operands->symtype && var->operands->symtype->kind == ARRAYSYM)
+            { return reduce_array(var->operands, dot, field); };
+         while (var->operands)
+            { if (var->operands->symtype && var->operands->symtype->kind == RECORDSYM) break;
+              var = var->operands;
+            };
+         var = var->operands;
+         varid = unaryop(makeop(POINTEROP), varid);
        };
     assert( var->symtype->kind == RECORDSYM );
     SYMBOL sym = var->symtype->datatype->datatype;
+    while (strncmp(sym->namestring, field->stringval, 16))
+       { if (sym->datatype->kind == RECORDSYM)
+            { int result = reduce_record(sym->datatype->datatype->datatype, field);
+              if (result != -1)
+                 { offset = sym->offset + result;
+                    TOKEN tokoff = fillintc(field, offset);
+                    varid = makearef(varid, tokoff, dot);
+                    if (sym->datatype->kind == RECORDSYM)
+                      { 
+                        sym = searchst(sym->datatype->namestring);
+                        varid->basicdt = sym->datatype->datatype->datatype->basicdt;
+                      }
+                    else if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
+                    return varid;
+                 }
+            };
+         sym = sym->link;
+         offset = sym->offset;
+       };
+    if (sym->datatype->kind == RECORDSYM)
+       { return varog; };
+    TOKEN tokoff = fillintc(field, offset);
+    varid = makearef(varid, tokoff, dot);
+    if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
+    return varid;
+  }
+
+static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field)
+  { int offset = 0;
+    SYMBOL sym = var->symtype->datatype->datatype->datatype;
     while (strncmp(sym->namestring, field->stringval, 16))
        { if (sym->datatype->kind == RECORDSYM)
             { int result = reduce_record(sym->datatype->datatype->datatype, field);
@@ -875,8 +914,8 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
          sym = sym->link;
          offset = sym->offset;
        };
-    TOKEN tokoff = fillintc(field, offset);
-    return makearef(var, tokoff, dot);
+    var->link->intval += offset;
+    return var;
   }
 
 static int reduce_record(SYMBOL sym, TOKEN field)
@@ -893,13 +932,13 @@ static int reduce_record(SYMBOL sym, TOKEN field)
 TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
   { assert( arr->symtype->kind == ARRAYSYM );
     int offset = 0;
-    SYMBOL typesym = arr->symtype;
+    SYMBOL typesym = arr->symtype->datatype;
     if (subs->tokentype == NUMBERTOK)
-       { offset = typesym->offset * subs->intval; }
-    // else /* IDENTIFIERTOK */
-    //    {
+       { offset = (typesym->size * (subs->intval - arr->symtype->lowbound)); }
+    else /* IDENTIFIERTOK */
+       { 
 
-    //    };
+       };
     return makearef(arr, fillintc(tokb, offset), tok);
   }
 
@@ -928,7 +967,8 @@ TOKEN instarray(TOKEN bounds, TOKEN typetok)
     sym->kind = ARRAYSYM;
     sym->datatype = typetok->symtype;
     SYMBOL typesym = bounds->symtype;
-    sym->size = typesym->highbound - typesym->lowbound + 1;
+    sym->size = (typesym->highbound - typesym->lowbound + 1)
+                * typetok->symtype->size;
     sym->offset = typetok->symtype->size;
     sym->lowbound = typesym->lowbound;
     sym->highbound = typesym->highbound;
