@@ -488,8 +488,14 @@ TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
          binop(tokas, args, tok);
          fn->link = makeintc(typesym->size);
          return tokas;
-       }
+       };
     fn->link = args;
+    if (strncmp(fn->stringval, "writeln", 16) == 0)
+       { if (args->basicdt == 0) 
+            { strcpy(fn->stringval, "writelni"); };
+         if (args->basicdt == 1)
+            { strcpy(fn->stringval, "writelnf"); };
+       };
     return tok;
   }
 
