@@ -126,8 +126,7 @@ simpletype      : IDENTIFIER                     { $$ = findtype($1); }
 simpletype_list : simpletype COMMA simpletype_list
                 | simpletype
                 ;
-block           : BEGINBEGIN statement endpart
-                          { $$ = makeprogn($1, cons($2, $3)); }
+block           : BEGINBEGIN statement endpart   { $$ = makeprogn($1, cons($2, $3)); }
                 ;
 statement       : BEGINBEGIN statement endpart
                           { $$ = makeprogn($1,cons($2, $3)); }
@@ -237,7 +236,7 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_FINDTYPE   16           /* bit to trace findtype */
 #define DB_INSTVARS   32           /* bit to trace instvars */
 #define DB_INSTPOINT  32           /* bit to trace instpoint */
-#define DB_REDUCEDOT  32
+#define DB_REDUCEDOT  64
 #define DB_DOPOINT    64
 #define DB_PARSERES  128           /* bit to trace parseresult */
 
@@ -484,7 +483,7 @@ TOKEN makefuncall(TOKEN tok, TOKEN fn, TOKEN args)
     tok->operands = fn;
     if (strncmp(fn->stringval, "new", 16) == 0)
        { TOKEN tokas = makeop(ASSIGNOP);
-         SYMBOL typesym = searchst(args->symtype->datatype->datatype->namestring);
+         SYMBOL typesym = searchst(args->symtype->datatype->namestring);
          binop(tokas, args, tok);
          fn->link = makeintc(typesym->size);
          return tokas;
@@ -690,7 +689,10 @@ TOKEN findtype(TOKEN tok)
             };
        }
     else
-       { tok->symtype = searchst(tok->stringval);
+       { SYMBOL sym = searchst(tok->stringval);
+         tok->symtype = sym;
+         if (sym->kind == TYPESYM)
+            { tok->symtype = sym->datatype; };
        };
     if (DEBUG & DB_FINDTYPE)
        { printf("findtype\n");
@@ -735,9 +737,8 @@ void  instvars(TOKEN idlist, TOKEN typetok)
 void  insttype(TOKEN typename, TOKEN typetok)
   { SYMBOL sym = insertsym(typename->stringval);
     SYMBOL typesym = typetok->symtype;
-    sym->kind = typesym->kind;
+    sym->kind = TYPESYM;
     sym->datatype = typesym;
-    sym->datatype->kind = TYPESYM;
     sym->size = typesym->size;
     sym->lowbound = typesym->lowbound;
     sym->highbound = typesym->highbound;
@@ -791,8 +792,7 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
   }
 
 static void setarg(TOKEN tok, int *size, int padding)
-  { strncpy(tok->symentry->namestring, tok->stringval, 16);
-    tok->symentry->offset = *size + padding;
+  { tok->symentry->offset = *size + padding;
     *size += tok->symentry->size + padding;
   }
 
@@ -804,7 +804,7 @@ TOKEN instfields(TOKEN idlist, TOKEN typetok)
   { SYMBOL typesym = typetok->symtype;
     TOKEN tokid = idlist;
     while (tokid)
-       { SYMBOL sym = symalloc();
+       { SYMBOL sym = makesym(tokid->stringval);
          sym->kind = ARGSYM;
          sym->datatype = typesym;
          sym->size = typesym->size;
@@ -878,18 +878,16 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
          varid = unaryop(makeop(POINTEROP), varid);
        };
     assert( var->symtype->kind == RECORDSYM );
-    SYMBOL sym = var->symtype->datatype->datatype;
+    SYMBOL sym = var->symtype->datatype;
     while (strncmp(sym->namestring, field->stringval, 16))
        { if (sym->datatype->kind == RECORDSYM)
-            { int result = reduce_record(sym->datatype->datatype->datatype, field);
+            { int result = reduce_record(sym->datatype->datatype, field);
               if (result != -1)
                  { offset = sym->offset + result;
                     TOKEN tokoff = fillintc(field, offset);
                     varid = makearef(varid, tokoff, dot);
                     if (sym->datatype->kind == RECORDSYM)
-                      { 
-                        sym = searchst(sym->datatype->namestring);
-                        varid->basicdt = sym->datatype->datatype->datatype->basicdt;
+                      { varid->basicdt = sym->datatype->datatype->datatype->basicdt;
                       }
                     else if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
                     return varid;
@@ -908,10 +906,10 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
 
 static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field)
   { int offset = 0;
-    SYMBOL sym = var->symtype->datatype->datatype->datatype;
+    SYMBOL sym = var->symtype->datatype->datatype;
     while (strncmp(sym->namestring, field->stringval, 16))
        { if (sym->datatype->kind == RECORDSYM)
-            { int result = reduce_record(sym->datatype->datatype->datatype, field);
+            { int result = reduce_record(sym->datatype->datatype, field);
               if (result != -1)
                  { offset = sym->offset + result;
                    break;
@@ -957,9 +955,10 @@ TOKEN dopoint(TOKEN var, TOKEN tok)
          dbugprinttok(tok);
        }
     if (var->whichval == AREFOP) return var;
+    var->symtype->datatype = searchst(var->symtype->datatype->namestring);
     assert( var->symtype->kind == POINTERSYM );
     assert( var->symtype->datatype->kind == TYPESYM );
-    tok->symtype = searchst(var->symtype->datatype->datatype->namestring);
+    tok->symtype = var->symtype->datatype->datatype;
     tok->operands = var;
     return tok;
   }
