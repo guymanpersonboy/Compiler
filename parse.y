@@ -517,11 +517,12 @@ TOKEN makewhile(TOKEN tok, TOKEN expr, TOKEN tokb, TOKEN statement)
   { TOKEN toklabel = makelabel();
     TOKEN toklab = makeprogn(tok, toklabel);
     TOKEN tokstat = makeprogn(tokb, statement);
-    TOKEN tokif = (TOKEN) talloc();
-    makeif(tokif, expr, tokstat, makegoto(labelnumber - 1));
+    TOKEN tokif = makeop(IFOP);
+    tokif->operands = expr;
+    expr->link = tokstat;
+    tokstat->operands->link = makegoto(labelnumber - 1);
     toklabel->link = tokif;
     return toklab;
-
   }
 
 /* makerepeat makes structures for a repeat statement.
