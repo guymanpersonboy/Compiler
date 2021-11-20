@@ -192,7 +192,7 @@ factor          : unsigned_constant
                 | NOT factor
                 ;
 unsigned_constant : NUMBER                       { $$ = $1; }
-                | NIL                            { $$ = $1; }
+                | NIL                            { $$ = fillintc($1, 0); }
                 | STRING                         { $$ = $1; }
                 ;
 variable        : IDENTIFIER                     { $$ = findid($1); }
@@ -769,7 +769,6 @@ TOKEN instpoint(TOKEN tok, TOKEN typename)
 TOKEN instrec(TOKEN rectok, TOKEN argstok)
   { int size = 0;
     int padding = 0;
-    int int_padding = 0;
     TOKEN tok = argstok;
     while (tok->link != NULL)
        { setarg(tok, &size, padding);
@@ -778,21 +777,17 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
         //  printf("%d", tok->symentry->offset);
         //  dbugprinttok(tok);
          padding = size % RECORDALIGN;
-         if (padding != 0) {
-           int_padding = 4;
-         }
-         /* TODO records/arrays alinged to 16, real/pointers to 8 */
-        //  if (tok->link->symentry->datatype && tok->link->symentry->datatype->kind == RECORDSYM)
-        //     {
-        //       padding = size % (RECORDALIGN + RECORDALIGN);
-        //     }
-         if (tok->link->symentry->size % RECORDALIGN != 0)
-            { padding = int_padding; };
+         /* records/arrays alinged to 16, real/pointers to 8 */
+         if (tok->symentry->size % RECORDALIGN != 0 && padding == 0)
+            { tok->link->symentry->offset = padding; }
          tok->symentry->link = tok->link->symentry;
          tok = tok->link;
        };
     setarg(tok, &size, padding);
-    padding = size % (RECORDALIGN + RECORDALIGN);
+    padding = 0;
+    int align = size % (RECORDALIGN + RECORDALIGN);
+    if (align != 0)
+      padding = (RECORDALIGN + RECORDALIGN) - align;
     // printf("\tsize + padding: %d\n", size + padding);
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
@@ -803,7 +798,7 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
   }
 
 static void setarg(TOKEN tok, int *size, int padding)
-  { tok->symentry->offset = *size + padding;
+  { tok->symentry->offset += *size + padding;
     *size += tok->symentry->size + padding;
   }
 
@@ -907,11 +902,15 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
          sym = sym->link;
          offset = sym->offset;
        };
+    TOKEN tokoff;
     if (sym->datatype->kind == RECORDSYM)
-       { return varog; };
-    TOKEN tokoff = fillintc(field, offset);
+       { tokoff = fillintc(field, sym->offset);
+         varog = makearef(varog, tokoff, dot);
+         return varog;
+       };
+    tokoff = fillintc(field, offset);
     varid = makearef(varid, tokoff, dot);
-    if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
+    if (sym->datatype->kind == BASICTYPE) varid->basicdt = sym->datatype->basicdt;
     return varid;
   }
 
