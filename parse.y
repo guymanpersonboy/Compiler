@@ -124,6 +124,7 @@ simpletype      : IDENTIFIER                     { $$ = findtype($1); }
                           { $$ = makesubrange($2, $1->intval, $3->intval); }
                 ;
 simpletype_list : simpletype COMMA simpletype_list
+                                                  { $$ = instarray($1, $3); }
                 | simpletype
                 ;
 block           : BEGINBEGIN statement endpart   { $$ = makeprogn($1, cons($2, $3)); }
@@ -671,7 +672,11 @@ TOKEN instenum(TOKEN idlist)
 /* findtype looks up a type name in the symbol table, puts the pointer
    to its type into tok->symtype, returns tok. */
 TOKEN findtype(TOKEN tok)
-  { if (tok->tokentype == NUMBERTOK)
+  { if (DEBUG & DB_FINDTYPE)
+       { printf("findtype\n");
+         dbugprinttok(tok);
+       };
+    if (tok->tokentype == NUMBERTOK)
        { switch (tok->basicdt)
             { case INTEGER:
                 tok->symtype = searchst("integer");
@@ -692,11 +697,9 @@ TOKEN findtype(TOKEN tok)
        { SYMBOL sym = searchst(tok->stringval);
          tok->symtype = sym;
          if (sym->kind == TYPESYM)
-            { tok->symtype = sym->datatype; };
-       };
-    if (DEBUG & DB_FINDTYPE)
-       { printf("findtype\n");
-         dbugprinttok(tok);
+            { 
+              tok->symtype = sym->datatype;
+            };
        };
     return tok;
   }
@@ -748,6 +751,7 @@ void  insttype(TOKEN typename, TOKEN typetok)
 TOKEN instpoint(TOKEN tok, TOKEN typename)
   { SYMBOL sym = symalloc();
     sym->kind = POINTERSYM;
+    sym->basicdt = POINTER;
     sym->datatype = makesym(typename->stringval);
     sym->size = basicsizes[POINTER];
     tok->symtype = sym;
@@ -765,6 +769,7 @@ TOKEN instpoint(TOKEN tok, TOKEN typename)
 TOKEN instrec(TOKEN rectok, TOKEN argstok)
   { int size = 0;
     int padding = 0;
+    int int_padding = 0;
     TOKEN tok = argstok;
     while (tok->link != NULL)
        { setarg(tok, &size, padding);
@@ -773,20 +778,26 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
         //  printf("%d", tok->symentry->offset);
         //  dbugprinttok(tok);
          padding = size % RECORDALIGN;
+         if (padding != 0) {
+           int_padding = 4;
+         }
          /* TODO records/arrays alinged to 16, real/pointers to 8 */
+        //  if (tok->link->symentry->datatype && tok->link->symentry->datatype->kind == RECORDSYM)
+        //     {
+        //       padding = size % (RECORDALIGN + RECORDALIGN);
+        //     }
          if (tok->link->symentry->size % RECORDALIGN != 0)
-            { padding = 0; };
+            { padding = int_padding; };
          tok->symentry->link = tok->link->symentry;
          tok = tok->link;
        };
     setarg(tok, &size, padding);
-    // printf("\tsize %d ", size);
-    // printf("%d", tok->symentry->offset);
-    // dbugprinttok(tok);
+    padding = size % (RECORDALIGN + RECORDALIGN);
+    // printf("\tsize + padding: %d\n", size + padding);
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
     recordsym->datatype = argstok->symentry;
-    recordsym->size = size;
+    recordsym->size = size + padding;
     rectok->symtype = recordsym;
     return rectok;
   }
@@ -967,16 +978,30 @@ TOKEN dopoint(TOKEN var, TOKEN tok)
    bounds points to a SUBRANGE symbol table entry.
    The symbol table pointer is returned in token typetok. */
 TOKEN instarray(TOKEN bounds, TOKEN typetok)
-  { assert( bounds->symtype->kind == SUBRANGE );
+  { if (bounds->symtype->kind == ARRAYSYM)
+       { assert (bounds->symtype->datatype->kind == SUBRANGE );
+          SYMBOL sym = symalloc();
+          sym->kind = ARRAYSYM;
+          sym->datatype = bounds->symtype->datatype;
+          SYMBOL rangesym = typetok->symtype;
+          sym->offset = bounds->symtype->size;
+          bounds->symtype->size = (rangesym->highbound - rangesym->lowbound + 1)
+                      * bounds->symtype->size;
+          sym->lowbound = rangesym->lowbound;
+          sym->highbound = rangesym->highbound;
+          bounds->symtype->datatype = sym;
+          return bounds;
+       }
+    assert( bounds->symtype->kind == SUBRANGE );
     SYMBOL sym = symalloc();
     sym->kind = ARRAYSYM;
     sym->datatype = typetok->symtype;
-    SYMBOL typesym = bounds->symtype;
-    sym->size = (typesym->highbound - typesym->lowbound + 1)
+    SYMBOL rangesym = bounds->symtype;
+    sym->size = (rangesym->highbound - rangesym->lowbound + 1)
                 * typetok->symtype->size;
     sym->offset = typetok->symtype->size;
-    sym->lowbound = typesym->lowbound;
-    sym->highbound = typesym->highbound;
+    sym->lowbound = rangesym->lowbound;
+    sym->highbound = rangesym->highbound;
     typetok->symtype = sym;
     return typetok;
   }
