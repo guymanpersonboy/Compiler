@@ -79,7 +79,7 @@ program         : PROGRAM IDENTIFIER LPAREN idlist RPAREN SEMICOLON lblock DOT
 lblock          : LABEL numlist SEMICOLON cblock { $$ = $4; }
                 | cblock
                 ;
-numlist         : NUMBER COMMA numlist           { instlabel($1); }
+numlist         : numlist COMMA NUMBER           { instlabel($3); }
                 | NUMBER                         { instlabel($1); }
                 ;
 cblock          : CONST cdef_list tblock         { $$ = $3; }
@@ -203,7 +203,7 @@ variable        : IDENTIFIER                     { $$ = findid($1); }
                 ;
 funcall         : IDENTIFIER LPAREN expr_list RPAREN  { $$ = makefuncall($4, $1, $3); }
                 ;
-expr_list       : expression COMMA expr_list
+expr_list       : expression COMMA expr_list     { $$ = cons($1, $3); }
                 | expression
                 ;
 field_list      : fields SEMICOLON field_list    { $$ = nconc($1, $3); }
@@ -237,9 +237,10 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_FINDTYPE   16           /* bit to trace findtype */
 #define DB_INSTVARS   32           /* bit to trace instvars */
 #define DB_INSTPOINT  32           /* bit to trace instpoint */
-#define DB_REDUCEDOT  64
-#define DB_DOPOINT    64
-#define DB_PARSERES  128           /* bit to trace parseresult */
+#define DB_REDUCEDOT  64           /* bit to trace reducedot */
+#define DB_DOPOINT    64           /* bit to trace dopoint */
+#define DB_ARRAYREF  128           /* bit to trace arrayref */
+#define DB_PARSERES    0           /* bit to trace parseresult */
 
   int labelnumber = 0;  /* sequential counter for internal label numbers */
   int labels[64];
@@ -439,10 +440,13 @@ TOKEN makelabel()
 /* dolabel is the action for a label of the form   <number>: <statement>
    tok is a (now) unused token that is recycled. */
 TOKEN dolabel(TOKEN labeltok, TOKEN tok, TOKEN statement)
-  { instlabel(labeltok);
+  { int i;
+    for (i = 0; i < 64; i++)
+       { if (labels[i] == labeltok->intval) break;
+       }
     labeltok->tokentype = OPERATOR;
     labeltok->whichval = LABELOP;
-    labeltok->operands = makeintc(labelnumber);
+    labeltok->operands = makeintc(i);
     labeltok->link = statement;
     return makeprogn(tok, labeltok);
   }
@@ -945,16 +949,36 @@ static int reduce_record(SYMBOL sym, TOKEN field)
    subs is a list of subscript expressions.
    tok and tokb are (now) unused tokens that are recycled. */
 TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
-  { assert( arr->symtype->kind == ARRAYSYM );
+  { if (DEBUG & DB_ARRAYREF)
+       { printf("arrayref\n");
+         dbugprinttok(arr);
+         dbugprinttok(tok);
+         dbugprinttok(subs);
+         dbugprinttok(tokb);
+       };
+    assert( arr->symtype->kind == ARRAYSYM );
     int offset = 0;
     SYMBOL typesym = arr->symtype->datatype;
     if (subs->tokentype == NUMBERTOK)
-       { offset = (typesym->size * (subs->intval - arr->symtype->lowbound)); }
+       { offset = (typesym->size * (subs->intval - arr->symtype->lowbound));
+         return makearef(arr, fillintc(tokb, offset), tok);
+       }
     else /* IDENTIFIERTOK */
-       { 
-
+       { TOKEN tokplus = makeop(PLUSOP);
+         TOKEN tokmult = makeop(TIMESOP);
+         if (arr->symentry->datatype->lowbound == 1)
+            { offset = subs->link->symentry->size * -1;
+              offset *= ((typesym->highbound - typesym->lowbound + 1) - (subs->link->intval));
+            }
+         else
+            { offset = (subs->symtype->size - typesym->highbound) * typesym->size;
+              offset *= -1;
+              offset += (subs->link->intval - typesym->lowbound) * typesym->datatype->size;
+            }
+         binop(tokmult, subs, fillintc(tokb, typesym->size));
+         binop(tokplus, tokmult, makeintc(offset));
+         return makearef(arr, tokplus, tok);
        };
-    return makearef(arr, fillintc(tokb, offset), tok);
   }
 
 /* dopoint handles a ^ operator.  john^ becomes (^ john) with type record
@@ -984,6 +1008,8 @@ TOKEN instarray(TOKEN bounds, TOKEN typetok)
           sym->kind = ARRAYSYM;
           sym->datatype = bounds->symtype->datatype;
           SYMBOL rangesym = typetok->symtype;
+          sym->size = (rangesym->highbound - rangesym->lowbound + 1)
+                      * sym->datatype->size;
           sym->offset = bounds->symtype->size;
           bounds->symtype->size = (rangesym->highbound - rangesym->lowbound + 1)
                       * bounds->symtype->size;
