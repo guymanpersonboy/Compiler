@@ -842,7 +842,8 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
 
 /* addoffs adds offset, off, to an aref expression, exp */
 TOKEN addoffs(TOKEN exp, TOKEN off)
-  { /* TODO use function if needed */
+  { exp->intval = off->intval;
+    // var = unaryop(makeop(POINTEROP), var;
     return exp;
   }
 
@@ -859,12 +860,16 @@ TOKEN mulint(TOKEN exp, int n)
    tok (if not NULL) is a (now) unused token that is recycled. */
 TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok)
   { tok = (tok) ? tok : (TOKEN) talloc();
-    tok->tokentype = OPERATOR;
-    tok->whichval = AREFOP;
-    // TODO may need to flip
-    tok->operands = var;
-    var->link = off;
-    return tok;
+    if (var && var->whichval != AREFOP) {
+      tok->tokentype = OPERATOR;
+      tok->whichval = AREFOP;
+      // TODO may need to flip
+      tok->operands = var;
+      var->link = off;
+      return tok;
+    }
+    addoffs(var->operands->link, off);
+    return var;
   }
 
 /* reducedot handles a record reference.
@@ -888,7 +893,6 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
               var = var->operands;
             };
          var = var->operands;
-         varid = unaryop(makeop(POINTEROP), varid);
        };
     assert( var->symtype->kind == RECORDSYM );
     SYMBOL sym = var->symtype->datatype;
@@ -898,12 +902,12 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
               if (result != -1)
                  { offset = sym->offset + result;
                     TOKEN tokoff = fillintc(field, offset);
-                    varid = makearef(varid, tokoff, dot);
+                    TOKEN tokresult = makearef(varid, tokoff, dot);
                     if (sym->datatype->kind == RECORDSYM)
                       { varid->basicdt = sym->datatype->datatype->datatype->basicdt;
                       }
                     else if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
-                    return varid;
+                    return tokresult;
                  }
             };
          sym = sym->link;
