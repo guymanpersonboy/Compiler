@@ -779,10 +779,6 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
     TOKEN tok = argstok;
     while (tok->link != NULL)
        { setarg(tok, &size, padding);
-        //  printf("link %d ", tok->link->symentry->size);
-        //  printf("size %d ", size);
-        //  printf("%d", tok->symentry->offset);
-        //  dbugprinttok(tok);
          padding = size % RECORDALIGN;
          /* records/arrays alinged to 16, real/pointers to 8 */
          if (tok->symentry->size % RECORDALIGN != 0 && padding == 0)
@@ -794,8 +790,7 @@ TOKEN instrec(TOKEN rectok, TOKEN argstok)
     padding = 0;
     int align = size % (RECORDALIGN + RECORDALIGN);
     if (align != 0)
-      padding = (RECORDALIGN + RECORDALIGN) - align;
-    // printf("\tsize + padding: %d\n", size + padding);
+       { padding = (RECORDALIGN + RECORDALIGN) - align; };
     SYMBOL recordsym = symalloc();
     recordsym->kind = RECORDSYM;
     recordsym->datatype = argstok->symentry;
@@ -843,7 +838,6 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
 /* addoffs adds offset, off, to an aref expression, exp */
 TOKEN addoffs(TOKEN exp, TOKEN off)
   { exp->intval = off->intval;
-    // var = unaryop(makeop(POINTEROP), var;
     return exp;
   }
 
@@ -863,7 +857,6 @@ TOKEN makearef(TOKEN var, TOKEN off, TOKEN tok)
     if (var && var->whichval != AREFOP) {
       tok->tokentype = OPERATOR;
       tok->whichval = AREFOP;
-      // TODO may need to flip
       tok->operands = var;
       var->link = off;
       return tok;
@@ -904,8 +897,8 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
                     TOKEN tokoff = fillintc(field, offset);
                     TOKEN tokresult = makearef(varid, tokoff, dot);
                     if (sym->datatype->kind == RECORDSYM)
-                      { varid->basicdt = sym->datatype->datatype->datatype->basicdt;
-                      }
+                       { varid->basicdt = sym->datatype->datatype->datatype->basicdt;
+                       }
                     else if (sym->kind == BASICTYPE) varid->basicdt = sym->datatype->kind;
                     return tokresult;
                  }
@@ -921,7 +914,10 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
        };
     tokoff = fillintc(field, offset);
     varid = makearef(varid, tokoff, dot);
-    if (sym->datatype->kind == BASICTYPE) varid->basicdt = sym->datatype->basicdt;
+    if (sym->datatype->kind == RECORDSYM)
+       { varid->basicdt = sym->datatype->datatype->datatype->basicdt;
+       }
+    else if (sym->datatype->kind == BASICTYPE) varid->basicdt = sym->datatype->basicdt;
     return varid;
   }
 
@@ -940,8 +936,7 @@ static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field)
         offset = sym->offset;
       };
     if (!var->operands->link->operands)
-       { 
-         var->operands->link->intval += offset;
+       { var->operands->link->intval += offset;
          return var;
        }
     else /* IDENTIFIERTOK */
@@ -955,11 +950,11 @@ static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field)
                         * var->operands->symtype->offset;
               offset *= -1;
               offset += sym->offset;
-            }
+            };
          binop(dot, var->operands->link, fillintc(field, offset));
          var->operands->link = dot;
          return var;
-       }
+       };
   }
 
 static int reduce_record(SYMBOL sym, TOKEN field)
@@ -994,10 +989,8 @@ static TOKEN array_ref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
          return makearef(arr, fillintc(tokb, offset), tok);
        }
     else /* IDENTIFIERTOK */
-       { //TOKEN tokplus = makeop(PLUSOP);
-         TOKEN tokmult = makeop(TIMESOP);
+       { TOKEN tokmult = makeop(TIMESOP);
          binop(tokmult, subs, fillintc(tokb, typesym->size));
-        //  binop(tokplus, tokmult, makeintc(offset));      
          return makearef(arr, tokmult, tok);
        }
   }
