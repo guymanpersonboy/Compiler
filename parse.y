@@ -46,6 +46,8 @@ static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void setarg(TOKEN tok, int *size, int padding);
 static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field);
 static int reduce_record(SYMBOL sym, TOKEN field);
+static TOKEN array_ref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
+static TOKEN array2d_ref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb);
 
         /* define the type of the Yacc stack element to be TOKEN */
 
@@ -880,7 +882,7 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
     if (var->whichval == POINTEROP && var->operands->whichval == AREFOP) var = var->operands;
     if (var->whichval == AREFOP)
        { if (var->operands->symtype && var->operands->symtype->kind == ARRAYSYM)
-            { return reduce_array(var->operands, dot, field); };
+            { return reduce_array(var, dot, field); };
          while (var->operands)
             { if (var->operands->symtype && var->operands->symtype->kind == RECORDSYM) break;
               var = var->operands;
@@ -921,20 +923,39 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
 
 static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field)
   { int offset = 0;
-    SYMBOL sym = var->symtype->datatype->datatype;
+    SYMBOL sym = var->operands->symtype->datatype->datatype;
     while (strncmp(sym->namestring, field->stringval, 16))
-       { if (sym->datatype->kind == RECORDSYM)
+      { if (sym->datatype->kind == RECORDSYM)
             { int result = reduce_record(sym->datatype->datatype, field);
               if (result != -1)
-                 { offset = sym->offset + result;
-                   break;
-                 }
+                { offset = sym->offset + result;
+                  break;
+                };
             };
-         sym = sym->link;
-         offset = sym->offset;
-       };
-    var->link->intval += offset;
-    return var;
+        sym = sym->link;
+        offset = sym->offset;
+      };
+    if (!var->operands->link->operands)
+       { 
+         var->operands->link->intval += offset;
+         return var;
+       }
+    else /* IDENTIFIERTOK */
+       { dot->tokentype = OPERATOR;
+         dot->whichval = PLUSOP;
+         if (var->operands->symtype->lowbound == 1)
+            { offset = (-1 * var->operands->symtype->offset) + offset;
+            }
+         else
+            { offset = (var->operands->link->operands->symtype->size - var->operands->symtype->lowbound)
+                        * var->operands->symtype->offset;
+              offset *= -1;
+              offset += sym->offset;
+            }
+         binop(dot, var->operands->link, fillintc(field, offset));
+         var->operands->link = dot;
+         return var;
+       }
   }
 
 static int reduce_record(SYMBOL sym, TOKEN field)
@@ -957,10 +978,33 @@ TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
          dbugprinttok(tokb);
        };
     assert( arr->symtype->kind == ARRAYSYM );
-    int offset = 0;
+    if (!subs->link) return array_ref(arr, tok, subs, tokb);
+    return array2d_ref(arr, tok, subs, tokb);
+  }
+
+static TOKEN array_ref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
+  { int offset = 0;
     SYMBOL typesym = arr->symtype->datatype;
     if (subs->tokentype == NUMBERTOK)
        { offset = (typesym->size * (subs->intval - arr->symtype->lowbound));
+         return makearef(arr, fillintc(tokb, offset), tok);
+       }
+    else /* IDENTIFIERTOK */
+       { //TOKEN tokplus = makeop(PLUSOP);
+         TOKEN tokmult = makeop(TIMESOP);
+         binop(tokmult, subs, fillintc(tokb, typesym->size));
+        //  binop(tokplus, tokmult, makeintc(offset));      
+         return makearef(arr, tokmult, tok);
+       }
+  }
+
+
+static TOKEN array2d_ref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
+  { int offset = 0;
+    SYMBOL typesym = arr->symtype->datatype;
+    if (subs->tokentype == NUMBERTOK)
+       { offset = (subs->intval - arr->symtype->lowbound) * typesym->size;
+         offset += (subs->link->intval - typesym->lowbound) * typesym->datatype->size;
          return makearef(arr, fillintc(tokb, offset), tok);
        }
     else /* IDENTIFIERTOK */
@@ -974,7 +1018,7 @@ TOKEN arrayref(TOKEN arr, TOKEN tok, TOKEN subs, TOKEN tokb)
             { offset = (subs->symtype->size - typesym->highbound) * typesym->size;
               offset *= -1;
               offset += (subs->link->intval - typesym->lowbound) * typesym->datatype->size;
-            }
+            };
          binop(tokmult, subs, fillintc(tokb, typesym->size));
          binop(tokplus, tokmult, makeintc(offset));
          return makearef(arr, tokplus, tok);
