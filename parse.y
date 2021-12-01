@@ -40,6 +40,7 @@
 #include "symtab.h"
 #include "parse.h"
 #include "pprint.h"
+#include "codegen.h"
 
 static void binop_fix(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
