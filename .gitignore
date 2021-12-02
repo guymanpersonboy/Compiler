@@ -6,4 +6,5 @@ y.tab.c
 y.tab.o
 codegen.o
 genasm.o
+compiler
 *.nfs*

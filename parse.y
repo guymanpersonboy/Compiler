@@ -43,7 +43,7 @@
 #include "codegen.h"
 
 static void binop_fix(TOKEN op, TOKEN lhs, TOKEN rhs);
-static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs);
+static void binop_float(TOKEN op, TOKEN lhs, TOKEN rhs);
 static void setarg(TOKEN tok, int *size, int padding);
 static TOKEN reduce_array(TOKEN var, TOKEN dot, TOKEN field);
 static int reduce_record(SYMBOL sym, TOKEN field);
@@ -304,7 +304,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
             { makefloat(lhs);
               return op;
             };
-         binop_extra(op, lhs, rhs);
+         binop_float(op, lhs, rhs);
        }
     else if (lhs->basicdt == REAL && rhs->basicdt == INTEGER)
        { op->basicdt = REAL;
@@ -312,7 +312,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
             { makefloat(rhs);
               return op;
             };
-         binop_extra(op, rhs, lhs); /* lhs and rhs flipped */
+         binop_float(op, rhs, lhs); /* lhs and rhs flipped */
        }; /* remove ^ not necessary? (pg 141)  */
     if (DEBUG & DB_BINOP)
        { printf("binop\n");
@@ -326,13 +326,13 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
 /* binop assign coercion helper */
 static void binop_fix(TOKEN op, TOKEN lhs, TOKEN rhs)
   { TOKEN tokcoer = makeop(FIXOP);
-    tokcoer->basicdt = lhs->basicdt;
+    tokcoer->basicdt = INTEGER;
     lhs->link = tokcoer;
     tokcoer->operands = rhs;
   }
 
 /* binop operator coercion helper */
-static void binop_extra(TOKEN op, TOKEN lhs, TOKEN rhs)
+static void binop_float(TOKEN op, TOKEN lhs, TOKEN rhs)
   { TOKEN tokfloat = makeop(FLOATOP);
     tokfloat->basicdt = REAL;
     op->operands = rhs;
@@ -365,11 +365,11 @@ TOKEN makefloat(TOKEN tok)
 
 /* makefix forces the item tok to be integer, by truncating a constant
    or by inserting a FIXOP operator */
-TOKEN makefix(TOKEN tok)
-  { tok->basicdt = INTEGER;
-    tok->intval = trunc(tok->realval);
-    return tok;
-  }
+// TOKEN makefix(TOKEN tok)
+//   { tok->basicdt = INTEGER;
+//     tok->intval = trunc(tok->realval);
+//     return tok;
+//   } /* TODO unused */
 
 /* fillintc smashes tok, making it into an INTEGER constant with value num */
 TOKEN fillintc(TOKEN tok, int num)
