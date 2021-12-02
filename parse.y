@@ -375,6 +375,7 @@ TOKEN makefloat(TOKEN tok)
 TOKEN fillintc(TOKEN tok, int num)
   { tok->tokentype = NUMBERTOK;
     tok->basicdt = INTEGER;
+    /* TODO if NIL, basicdt = POINTER */
     tok->symtype = NULL;
     tok->symentry = NULL;
     tok->operands = NULL;
