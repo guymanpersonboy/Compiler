@@ -38,11 +38,18 @@ void genc(TOKEN code);
 
 /* Set DEBUGGEN to 1 for debug printouts of code generation */
 #define DEBUGGEN 0
+/* used for op code instructions */
+#define SD_OFFSET 9
+#define Q_OFFSET 16
+/* TODO UNARYQ_OFFSET 15 */
 
 int nextlabel;    /* Next available label number */
 int stkframesize;   /* total stack frame size */
 
-bool regused[FMAX + 1];
+bool regused[FMAX + 1];   /* registers in use */
+static int regkind[ADDR + 1];    /* in: kind of data. out: reg */
+static int instmap[NOTOP + 1];   /* in: op number. out: op code */
+static int lclabel = 1;          /* track the .LC# labels */
 
 /* Top-level entry for code generator.
    pcode    = pointer to code:  (program foo (output) (progn ...))
@@ -61,6 +68,18 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      code = name->link->link;
      nextlabel = maxlabel + 1;
      stkframesize = asmentry(name->stringval,varsize);
+     int i;
+     for (i = 0; i < FMAX + 1; i++) { regused[i] = false; };
+     regkind[WORD] = EAX;
+     regkind[FLOAT] = XMM0;
+     regkind[ADDR] = RAX;
+     instmap[PLUSOP] = ADDL;
+     instmap[MINUSOP] = SUBL;
+     instmap[TIMESOP] = IMULL;
+     instmap[DIVIDEOP] = DIVL;
+     instmap[ANDOP] = ANDL;
+     instmap[OROP] = ORL;
+     instmap[NOTOP] = NOTQ; /* TODO add NOTL 11 to genasm.h? */
      genc(code);
      asmexit(name->stringval);
   }
@@ -83,15 +102,28 @@ int genarith(TOKEN code)
                   asmimmed(MOVL, num, reg);
                 break;
               case REAL:
-                /*     ***** fix this *****   */
+                reg = getreg(FLOAT);
+                makeflit(code->realval, lclabel);
+                asmldflit(MOVSD, lclabel++, reg);
                 break;
             }
           break;
         case IDENTIFIERTOK:
-          /*     ***** fix this *****   */
+          switch (code->basicdt)
+            { case POINTER:
+                reg = getreg(ADDR);
+                break;
+            }
           break;
         case OPERATOR:
-          /*     ***** fix this *****   */
+          switch (code->basicdt)
+            { case INTEGER:
+                reg = getreg(WORD);
+                break;
+              case REAL:
+                reg = getreg(FLOAT);
+                break;
+            }
           break;
       };
     return reg;
@@ -127,9 +159,28 @@ void genc(TOKEN code)
           offs = sym->offset - stkframesize; /* net offset of the var   */
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
+                if (rhs->tokentype == OPERATOR)
+                   { asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
+                     asmimmed(MOVL, rhs->operands->link->intval, ECX);
+                     asmrr(instmap[rhs->whichval], ECX, reg);
+                   }
                 asmst(MOVL, reg, offs, lhs->stringval);
                 break;
-                /* ...  */
+              case REAL:
+                if (rhs->tokentype == OPERATOR)
+                   { makeflit(rhs->operands->link->realval, lclabel);
+                     asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
+                     int reg1 = getreg(FLOAT);
+                     asmldflit(MOVSD, lclabel++, reg1);
+                     asmrr(instmap[rhs->whichval] + SD_OFFSET, reg1, reg);
+                   }
+                asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
+                break;
+              case POINTER:
+                /* TODO offs + FLOATSIZE? */
+                asmldr(MOVQ, offs + FLOATSIZE, RBP, reg, rhs->stringval);
+                asmstr(MOVQ, reg, offs, RBP, lhs->stringval);
+                break;
             };
           break;
         case FUNCALLOP:
@@ -166,13 +217,16 @@ void used(int reg)
     regused[reg] = true;
   }
 
-/* Trivial version: always returns RBASE + 0 */
 /* Get a register.   */
 /* Need a type parameter or two versions for INTEGER or REAL */
 int getreg(int kind)
   {
-    /*     ***** fix this *****   */
-     return RBASE;
+    int reg = regkind[kind];
+    if (regused[reg])
+       { reg++;
+       };
+    used(reg);
+    return reg;
   }
 
 /* Make a register non-volatile by moving it if necessary.
