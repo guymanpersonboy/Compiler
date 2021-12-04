@@ -110,7 +110,10 @@ int genarith(TOKEN code)
           break;
         case IDENTIFIERTOK:
           switch (code->basicdt)
-            { case POINTER:
+            { case REAL:
+                reg = getreg(FLOAT);
+                break;
+              case POINTER:
                 reg = getreg(ADDR);
                 break;
             }
@@ -167,6 +170,10 @@ void genc(TOKEN code)
                 asmst(MOVL, reg, offs, lhs->stringval);
                 break;
               case REAL:
+                if (rhs->tokentype == IDENTIFIERTOK)
+                   { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
+                     asmfloat(EAX, reg);
+                   }
                 if (rhs->tokentype == OPERATOR)
                    { makeflit(rhs->operands->link->realval, lclabel);
                      asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
