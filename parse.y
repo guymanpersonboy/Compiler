@@ -234,6 +234,7 @@ sign            : PLUS                           { $$ = $1; }
 #define DB_CONS        1           /* bit to trace cons */
 #define DB_BINOP       2           /* bit to trace binop */
 #define DB_MAKEIF      4           /* bit to trace makeif */
+#define DB_MAKEWHILE   4           /* bit to trace makewhile */
 #define DB_MAKEFOR     4           /* bit to trace makefor */
 #define DB_FINDID      8           /* bit to trace findid */
 #define DB_INSTCONST   8           /* bit to trace instconst */
@@ -343,6 +344,7 @@ static void binop_float(TOKEN op, TOKEN lhs, TOKEN rhs)
 /* unaryop links a unary operator op to one operand, lhs */
 TOKEN unaryop(TOKEN op, TOKEN lhs)
   { op->operands = lhs;
+    op->basicdt = lhs->basicdt;
     return op;
   }
 
@@ -373,9 +375,12 @@ TOKEN makefloat(TOKEN tok)
 
 /* fillintc smashes tok, making it into an INTEGER constant with value num */
 TOKEN fillintc(TOKEN tok, int num)
-  { tok->tokentype = NUMBERTOK;
+  { int toktype = tok->tokentype;
+    tok->tokentype = NUMBERTOK;
     tok->basicdt = INTEGER;
-    /* TODO if NIL, basicdt = POINTER */
+    if (toktype == RESERVED && tok->whichval == (NIL - RESERVED_BIAS))
+       { tok->basicdt = POINTER;
+       };
     tok->symtype = NULL;
     tok->symentry = NULL;
     tok->operands = NULL;
@@ -522,11 +527,19 @@ TOKEN makeprogram(TOKEN name, TOKEN args, TOKEN statements)
 /* makewhile makes structures for a while statement.
    tok and tokb are (now) unused tokens that are recycled. */
 TOKEN makewhile(TOKEN tok, TOKEN expr, TOKEN tokb, TOKEN statement)
-  { TOKEN toklabel = makelabel();
+  { if (DEBUG & DB_MAKEWHILE)
+        { printf("makewhile\n");
+          dbugprinttok(tok);
+          dbugprinttok(expr);
+          dbugprinttok(tokb);
+          dbugprinttok(statement);
+        };
+    TOKEN toklabel = makelabel();
     TOKEN toklab = makeprogn(tok, toklabel);
     TOKEN tokstat = makeprogn(tokb, statement);
     TOKEN tokif = makeop(IFOP);
     tokif->operands = expr;
+    tokif->basicdt = expr->basicdt;
     expr->link = tokstat;
     tokstat->operands->link = makegoto(labelnumber - 1);
     toklabel->link = tokif;

@@ -41,14 +41,16 @@ void genc(TOKEN code);
 /* used for op code instructions */
 #define SD_OFFSET 9
 #define Q_OFFSET 16
-/* TODO UNARYQ_OFFSET 15 */
+// TODO UNARYQ_OFFSET 15
 
 int nextlabel;    /* Next available label number */
 int stkframesize;   /* total stack frame size */
 
 bool regused[FMAX + 1];   /* registers in use */
 static int regkind[ADDR + 1];    /* in: kind of data. out: reg */
-static int instmap[NOTOP + 1];   /* in: op number. out: op code */
+static int instmap[NOTOP + 1];   /* in: op number. out: op code inst */
+static int jumpmap[GTOP + 1];    /* in: op number. out: op code jump */
+// TODO: replace with nextlabel where applicable
 static int lclabel = 1;          /* track the .LC# labels */
 
 /* Top-level entry for code generator.
@@ -73,13 +75,16 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      regkind[WORD] = EAX;
      regkind[FLOAT] = XMM0;
      regkind[ADDR] = RAX;
+
      instmap[PLUSOP] = ADDL;
      instmap[MINUSOP] = SUBL;
      instmap[TIMESOP] = IMULL;
      instmap[DIVIDEOP] = DIVL;
      instmap[ANDOP] = ANDL;
      instmap[OROP] = ORL;
-     instmap[NOTOP] = NOTQ; /* TODO add NOTL 11 to genasm.h? */
+     instmap[NOTOP] = NOTQ; // TODO: add NOTL 11 to genasm.h?
+
+     jumpmap[NEOP] = JNE;
      genc(code);
      asmexit(name->stringval);
   }
@@ -91,6 +96,12 @@ int genarith(TOKEN code)
     if (DEBUGGEN)
        { printf("genarith\n");
 	       dbugprinttok(code);
+         dbugprinttok(code->operands);
+         if (code->operands->link)
+            { dbugbprinttok(code->operands->link);
+              // printf("%s", code->operands->link->symentry->namestring);
+              // printf("%s", code->operands->link->symtype->namestring);
+            };
        };
     switch ( code->tokentype )
       { case NUMBERTOK:
@@ -135,7 +146,7 @@ int genarith(TOKEN code)
 
 /* Generate code for a Statement from an intermediate-code form */
 void genc(TOKEN code)
-  { TOKEN tok, lhs, rhs;
+  { TOKEN tok, lhs, rhs, expr;
     int reg, offs;
     SYMBOL sym;
     if (DEBUGGEN)
@@ -154,7 +165,7 @@ void genc(TOKEN code)
               tok = tok->link;
             };
           break;
-        case ASSIGNOP:                   /* Trivial version: handles I := e */
+        case ASSIGNOP:
           lhs = code->operands;
           rhs = lhs->link;
           reg = genarith(rhs);              /* generate rhs into a register */
@@ -163,28 +174,54 @@ void genc(TOKEN code)
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
-                   { asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
-                     asmimmed(MOVL, rhs->operands->link->intval, ECX);
-                     asmrr(instmap[rhs->whichval], ECX, reg);
-                   }
+                   { if (rhs->operands->link)
+                        { int reg1 = getreg(WORD);
+                          reg1 = (reg1 != reg) ? reg1 : ECX;
+                        //  printf("1");
+                          asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
+                        //  printf("2");
+                          if (rhs->operands->link->tokentype == NUMBERTOK)
+                            { asmimmed(MOVL, rhs->operands->link->intval, reg1);
+                            }
+                          else /* IDENTIFIERTOK */
+                            { asmldr(MOVL, offs + WORDSIZE, RBP, reg1, rhs->operands->link->stringval);
+                            };
+                        //  printf("3");
+                          /* op code instructions */
+                          asmrr(instmap[rhs->whichval], reg1, reg);
+                        }
+                     else /* unaryop */
+                        { printf("TODO: INTEGER unaryop");
+                        };
+                   };
+                // printf("reg %d", reg);
                 asmst(MOVL, reg, offs, lhs->stringval);
                 break;
               case REAL:
                 if (rhs->tokentype == IDENTIFIERTOK)
                    { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
                      asmfloat(EAX, reg);
-                   }
+                   };
                 if (rhs->tokentype == OPERATOR)
-                   { makeflit(rhs->operands->link->realval, lclabel);
-                     asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
-                     int reg1 = getreg(FLOAT);
-                     asmldflit(MOVSD, lclabel++, reg1);
-                     asmrr(instmap[rhs->whichval] + SD_OFFSET, reg1, reg);
-                   }
+                   { if (rhs->operands->link)
+                        { makeflit(rhs->operands->link->realval, lclabel);
+                          asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
+                          int reg1 = getreg(FLOAT);
+                          asmldflit(MOVSD, lclabel++, reg1);
+                          asmrr(instmap[rhs->whichval] + SD_OFFSET, reg1, reg);
+                        }
+                     else /* unaryop */
+                        { asmldr(MOVSD, offs + FLOATSIZE, RBP, reg, rhs->operands->stringval);
+                          int reg1 = getreg(FLOAT);
+                          asmfneg(reg, reg1);
+                          asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
+                          break;
+                        };
+                   };
                 asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
                 break;
               case POINTER:
-                /* TODO offs + FLOATSIZE? */
+                // TODO offs + FLOATSIZE?
                 asmldr(MOVQ, offs + FLOATSIZE, RBP, reg, rhs->stringval);
                 asmstr(MOVQ, reg, offs, RBP, lhs->stringval);
                 break;
@@ -197,10 +234,36 @@ void genc(TOKEN code)
           /*     ***** fix this *****   */
           break;
         case LABELOP:
-          /*     ***** fix this *****   */
+          asmlabel(code->operands->intval);
           break;
         case IFOP:
-          /*     ***** fix this *****   */
+          expr = code->operands;
+          lhs = expr->operands;
+          rhs = lhs->link;
+          sym = lhs->symentry;              /* assumes lhs is a simple var  */
+          offs = sym->offset - stkframesize; /* net offset of the var   */
+          TOKEN statement = expr->link;     /* while loop statement */
+          // call after .L2 genc(statement)
+          reg = genarith(statement->operands->operands->link); /* generate statement rhs into a register */
+          int reg1 = getreg(WORD); /* assumes the statement deals with INTEGER only */
+          TOKEN tokgoto = statement->operands->link;
+          switch ( code->basicdt )
+            { case INTEGER:
+              case POINTER:
+                /* if section */
+                asmldr(MOVQ, offs, RBP, reg, expr->operands->stringval);
+                asmimmed(MOVQ, rhs->intval, reg1);
+                asmrr(CMPQ, reg1, reg);
+                asmjump(jumpmap[expr->whichval], nextlabel++);
+                asmjump(JMP, nextlabel);
+                /* statement section */
+                asmlabel(nextlabel - 1);
+                genc(statement);
+                asmjump(JMP, tokgoto->operands->intval);
+                /* endwhile */
+                asmlabel(nextlabel);
+                break;
+            };
           break;
 	    };
   }
@@ -231,6 +294,9 @@ int getreg(int kind)
     int reg = regkind[kind];
     if (regused[reg])
        { reg++;
+       };
+    if (regused[reg])
+       { reg--;
        };
     used(reg);
     return reg;
