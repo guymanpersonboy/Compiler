@@ -42,6 +42,7 @@ void genc(TOKEN code);
 #define SD_OFFSET 9
 #define Q_OFFSET 16
 // TODO UNARYQ_OFFSET 15
+// TODO JUMP_BIAS 6 /* subtract jumpmap by this so size is only 6 (EQOP) */
 
 int nextlabel;    /* Next available label number */
 int stkframesize;   /* total stack frame size */
@@ -84,7 +85,12 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      instmap[OROP] = ORL;
      instmap[NOTOP] = NOTQ; // TODO: add NOTL 11 to genasm.h?
 
+     jumpmap[EQOP] = JE;
      jumpmap[NEOP] = JNE;
+     jumpmap[LTOP] = JL;
+     jumpmap[LEOP] = JLE;
+     jumpmap[GEOP] = JGE;
+     jumpmap[GTOP] = JG;
      genc(code);
      asmexit(name->stringval);
   }
@@ -96,12 +102,8 @@ int genarith(TOKEN code)
     if (DEBUGGEN)
        { printf("genarith\n");
 	       dbugprinttok(code);
-         dbugprinttok(code->operands);
-         if (code->operands->link)
-            { dbugbprinttok(code->operands->link);
-              // printf("%s", code->operands->link->symentry->namestring);
-              // printf("%s", code->operands->link->symtype->namestring);
-            };
+        //  if (code->operands) dbugprinttok(code->operands);
+        //  if (code->operands->link) dbugbprinttok(code->operands->link);
        };
     switch ( code->tokentype )
       { case NUMBERTOK:
@@ -244,19 +246,38 @@ void genc(TOKEN code)
           offs = sym->offset - stkframesize; /* net offset of the var   */
           TOKEN statement = expr->link;     /* while loop statement */
           // call after .L2 genc(statement)
-          reg = genarith(statement->operands->operands->link); /* generate statement rhs into a register */
-          int reg1 = getreg(WORD); /* assumes the statement deals with INTEGER only */
-          TOKEN tokgoto = statement->operands->link;
+          TOKEN tokgoto;
+          int reg1;
           switch ( code->basicdt )
-            { case INTEGER:
+            { case BOOLETYPE: /* parse.y only sets for-loop as BOOLETYPE */
+                /* for loop if section */
+                reg1 = getreg(WORD);
+                reg = getreg(WORD);
+                asmldr(MOVL, offs, RBP, reg, lhs->stringval);
+                asmimmed(MOVL, rhs->intval, reg1);
+                asmrr(CMPL, reg1, reg);
+                asmjump(jumpmap[expr->whichval], nextlabel++);
+                asmjump(JMP, nextlabel);
+                /* statement section */
+                tokgoto = statement->operands->link->link;
+                asmlabel(nextlabel - 1);
+                genc(statement);
+                asmjump(JMP, tokgoto->operands->intval);
+                /* endfor */
+                asmlabel(nextlabel);
+                break;
+              case INTEGER:
               case POINTER:
-                /* if section */
+                /* while-loop if section */
+                reg = genarith(statement->operands->operands->link); /* generate statement rhs into a register */
+                reg1 = getreg(WORD); /* assumes the statement deals with INTEGER only */
                 asmldr(MOVQ, offs, RBP, reg, expr->operands->stringval);
                 asmimmed(MOVQ, rhs->intval, reg1);
                 asmrr(CMPQ, reg1, reg);
                 asmjump(jumpmap[expr->whichval], nextlabel++);
                 asmjump(JMP, nextlabel);
                 /* statement section */
+                tokgoto = statement->operands->link;
                 asmlabel(nextlabel - 1);
                 genc(statement);
                 asmjump(JMP, tokgoto->operands->intval);

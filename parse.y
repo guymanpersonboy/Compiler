@@ -578,6 +578,7 @@ TOKEN makefor(int sign, TOKEN tok, TOKEN asg, TOKEN tokb, TOKEN endexpr,
          TOKEN tokle = binop(makeop(LEOP), tok1, endexpr);
          /* tokc becomes progn containing thenpart and i++ and goto */
          makeif(tokb, tokle, makeprogn(tokc, statement), NULL);
+         tokb->basicdt = BOOLETYPE;
          statement->link = makeplus(tok2, makeintc(1), makeop(PLUSOP));
          statement->link->link = makegoto(labelnumber - 1);
        };
@@ -847,6 +848,7 @@ TOKEN makeplus(TOKEN lhs, TOKEN rhs, TOKEN tok)
     tokas->operands = lhs;
     TOKEN tok1 = copytok(lhs);
     lhs->link = binop(tok, tok1, rhs);
+    tokas->basicdt = tok->basicdt;
     return tokas;
   }
 
