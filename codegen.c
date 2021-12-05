@@ -134,6 +134,9 @@ int genarith(TOKEN code)
           switch (code->basicdt)
             { case INTEGER:
                 reg = getreg(WORD);
+                if (code->whichval == FUNCALLOP) /* new */
+                   { asmimmed(MOVL, code->operands->link->intval, reg);
+                   };
                 break;
               case REAL:
                 reg = getreg(FLOAT);
@@ -204,8 +207,16 @@ void genc(TOKEN code)
                      asmfloat(EAX, reg);
                    };
                 if (rhs->tokentype == OPERATOR)
-                   { if (rhs->operands->link)
-                        { makeflit(rhs->operands->link->realval, nextlabel);
+                   { if (rhs->operands->link) /* binop rhs */
+                        { TOKEN rhsrhs = rhs->operands->link;
+                          if (rhs->whichval == FUNCALLOP) /* new */
+                             { offs = rhsrhs->symentry->offset - stkframesize;
+                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->stringval);
+                               asmcall(rhs->operands->stringval);
+                               asmstr(MOVSD, reg, offs + FLOATSIZE, RBP, lhs->stringval);
+                               break;
+                             };
+                          makeflit(rhsrhs->realval, nextlabel);
                           asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
                           int reg1 = getreg(FLOAT);
                           asmldflit(MOVSD, nextlabel++, reg1);
@@ -222,6 +233,12 @@ void genc(TOKEN code)
                 asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
                 break;
               case POINTER:
+                if (funcallin(code))
+                   { asmrr(MOVL, reg, getreg(RDI));
+                     asmcall(rhs->operands->stringval);
+                     asmstr(MOVQ, reg, offs, RBP, sym->namestring);
+                     break;
+                   };
                 // TODO offs + FLOATSIZE?
                 asmldr(MOVQ, offs + FLOATSIZE, RBP, reg, rhs->stringval);
                 asmstr(MOVQ, reg, offs, RBP, lhs->stringval);
@@ -231,11 +248,13 @@ void genc(TOKEN code)
         case FUNCALLOP:
           lhs = code->operands;
           rhs = lhs->link;
+          int regd;
           switch ( rhs->tokentype )
             { case IDENTIFIERTOK:
                 reg = getreg(WORD);
-                int regd = getreg(RDI);
-                asmldr(MOVL, -32, RBP, reg, rhs->stringval);
+                regd = getreg(RDI);
+                offs = rhs->symentry->offset - stkframesize; /* net offset of the var   */
+                asmldr(MOVL, offs, RBP, reg, rhs->stringval);
                 asmrr(MOVL, reg, regd);
                 asmcall(lhs->stringval);
                 break;
@@ -244,7 +263,7 @@ void genc(TOKEN code)
                 asmcall(lhs->stringval);
                 makeblit(rhs->stringval, nextlabel++);
                 break;
-            }
+            };
           break;
         case GOTOOP:
           /*     ***** fix this *****   */
@@ -370,7 +389,10 @@ void restorereg()
 
 /* test if there is a function call within code: 1 if true, else 0 */
 int funcallin(TOKEN code)
-  {
+  { /* new? */
+    if (code->operands->link && code->operands->link->whichval == FUNCALLOP)
+       { return true;
+       };
     return false;
   }
 
