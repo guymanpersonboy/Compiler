@@ -237,6 +237,7 @@ void genc(TOKEN code)
           break;
         case LABELOP:
           asmlabel(code->operands->intval);
+          clearreg();
           break;
         case IFOP:
           expr = code->operands;
@@ -249,14 +250,24 @@ void genc(TOKEN code)
           TOKEN tokgoto;
           int reg1;
           switch ( code->basicdt )
-            { case BOOLETYPE: /* parse.y only sets for-loop as BOOLETYPE */
+            { case BOOLETYPE: /* either for-loop or repeat statement */
                 /* for loop if section */
-                reg1 = getreg(WORD);
                 reg = getreg(WORD);
+                reg1 = getreg(WORD);
+                bool same = reg == reg1;
+                reg1 = (same) ? reg+1 : reg1;
                 asmldr(MOVL, offs, RBP, reg, lhs->stringval);
                 asmimmed(MOVL, rhs->intval, reg1);
                 asmrr(CMPL, reg1, reg);
                 asmjump(jumpmap[expr->whichval], nextlabel++);
+                if (same) /* repeat statement */
+                   { asmjump(JMP, code->operands->link->link->operands->intval);
+                     asmjump(JMP, nextlabel);
+                     /* end repeat */
+                     asmlabel(nextlabel - 1);
+                     asmlabel(nextlabel);
+                     break;
+                   }
                 asmjump(JMP, nextlabel);
                 /* statement section */
                 tokgoto = statement->operands->link->link;
@@ -266,7 +277,8 @@ void genc(TOKEN code)
                 /* endfor */
                 asmlabel(nextlabel);
                 break;
-              case INTEGER:
+              case INTEGER: /* while-loop not set as BOOLETYPE */
+              case REAL:    /* assumes while-loop always uses MOVQ */
               case POINTER:
                 /* while-loop if section */
                 reg = genarith(statement->operands->operands->link); /* generate statement rhs into a register */

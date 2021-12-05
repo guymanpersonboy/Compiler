@@ -554,6 +554,7 @@ TOKEN makerepeat(TOKEN tok, TOKEN statements, TOKEN tokb, TOKEN expr)
     TOKEN tokstat = makeprogn(tokb, statements);
     toklabel->link = tokstat;
     TOKEN tokif = (TOKEN) talloc();
+    tokif->basicdt = BOOLETYPE;
     TOKEN toknoop = (TOKEN) talloc();
     makeif(tokif, expr, makeprogn(toknoop, NULL), makegoto(labelnumber - 1));
     tokstat->link = tokif;
