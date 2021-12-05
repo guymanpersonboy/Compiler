@@ -42,17 +42,15 @@ void genc(TOKEN code);
 #define SD_OFFSET 9
 #define Q_OFFSET 16
 // TODO UNARYQ_OFFSET 15
-// TODO JUMP_BIAS 6 /* subtract jumpmap by this so size is only 6 (EQOP) */
+// TODO JUMP_OFFSET 6 /* subtract jumpmap by this so size is only 6 (EQOP) */
 
 int nextlabel;    /* Next available label number */
 int stkframesize;   /* total stack frame size */
 
-bool regused[FMAX + 1];   /* registers in use */
-static int regkind[ADDR + 1];    /* in: kind of data. out: reg */
+static bool regused[FMAX + 1];   /* registers in use */
+static int regkind[RDI + 1];    /* in: kind of data. out: reg */
 static int instmap[NOTOP + 1];   /* in: op number. out: op code inst */
 static int jumpmap[GTOP + 1];    /* in: op number. out: op code jump */
-// TODO: replace with nextlabel where applicable
-static int lclabel = 1;          /* track the .LC# labels */
 
 /* Top-level entry for code generator.
    pcode    = pointer to code:  (program foo (output) (progn ...))
@@ -76,6 +74,7 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      regkind[WORD] = EAX;
      regkind[FLOAT] = XMM0;
      regkind[ADDR] = RAX;
+     regkind[RDI] = EDI;
 
      instmap[PLUSOP] = ADDL;
      instmap[MINUSOP] = SUBL;
@@ -116,8 +115,8 @@ int genarith(TOKEN code)
                 break;
               case REAL:
                 reg = getreg(FLOAT);
-                makeflit(code->realval, lclabel);
-                asmldflit(MOVSD, lclabel++, reg);
+                makeflit(code->realval, nextlabel);
+                asmldflit(MOVSD, nextlabel++, reg);
                 break;
             }
           break;
@@ -206,10 +205,10 @@ void genc(TOKEN code)
                    };
                 if (rhs->tokentype == OPERATOR)
                    { if (rhs->operands->link)
-                        { makeflit(rhs->operands->link->realval, lclabel);
+                        { makeflit(rhs->operands->link->realval, nextlabel);
                           asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
                           int reg1 = getreg(FLOAT);
-                          asmldflit(MOVSD, lclabel++, reg1);
+                          asmldflit(MOVSD, nextlabel++, reg1);
                           asmrr(instmap[rhs->whichval] + SD_OFFSET, reg1, reg);
                         }
                      else /* unaryop */
@@ -230,7 +229,22 @@ void genc(TOKEN code)
             };
           break;
         case FUNCALLOP:
-          /*     ***** fix this *****   */
+          lhs = code->operands;
+          rhs = lhs->link;
+          switch ( rhs->tokentype )
+            { case IDENTIFIERTOK:
+                reg = getreg(WORD);
+                int regd = getreg(RDI);
+                asmldr(MOVL, -32, RBP, reg, rhs->stringval);
+                asmrr(MOVL, reg, regd);
+                asmcall(lhs->stringval);
+                break;
+              case STRINGTOK:
+                asmlitarg(nextlabel, getreg(RDI));
+                asmcall(lhs->stringval);
+                makeblit(rhs->stringval, nextlabel++);
+                break;
+            }
           break;
         case GOTOOP:
           /*     ***** fix this *****   */
