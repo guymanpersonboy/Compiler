@@ -134,8 +134,14 @@ int genarith(TOKEN code)
           switch (code->basicdt)
             { case INTEGER:
                 reg = getreg(WORD);
-                if (code->whichval == FUNCALLOP) /* new */
-                   { asmimmed(MOVL, code->operands->link->intval, reg);
+                if (code->whichval == FUNCALLOP)
+                   { if (strncmp(code->operands->stringval, "new", 16) == 0)
+                     { asmimmed(MOVL, code->operands->link->intval, reg);
+                     }
+                     else if (strncmp(code->operands->stringval, "iround", 16) == 0)
+                     { unused(reg);
+                       reg = getreg(FLOAT);
+                     };
                    };
                 break;
               case REAL:
@@ -178,19 +184,24 @@ void genc(TOKEN code)
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
-                   { if (rhs->operands->link)
-                        { int reg1 = getreg(WORD);
-                          reg1 = (reg1 != reg) ? reg1 : ECX;
-                        //  printf("1");
+                   { if (rhs->operands->link) /* binop rhs */
+                        { TOKEN rhsrhs = rhs->operands->link;
+                          int reg1 = getreg(WORD);
+                          if (rhs->whichval == FUNCALLOP)
+                             { offs = rhsrhs->symentry->offset - stkframesize;
+                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->stringval);
+                               asmcall(rhs->operands->stringval);
+                               asmstr(MOVL, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
+                               break;
+                             };
+                          reg1 = (reg == reg1) ? reg+1 : reg1;
                           asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
-                        //  printf("2");
-                          if (rhs->operands->link->tokentype == NUMBERTOK)
-                            { asmimmed(MOVL, rhs->operands->link->intval, reg1);
+                          if (rhsrhs->tokentype == NUMBERTOK)
+                            { asmimmed(MOVL, rhsrhs->intval, reg1);
                             }
                           else /* IDENTIFIERTOK */
-                            { asmldr(MOVL, offs + WORDSIZE, RBP, reg1, rhs->operands->link->stringval);
+                            { asmldr(MOVL, offs + WORDSIZE, RBP, reg1, rhsrhs->stringval);
                             };
-                        //  printf("3");
                           /* op code instructions */
                           asmrr(instmap[rhs->whichval], reg1, reg);
                         }
@@ -198,22 +209,44 @@ void genc(TOKEN code)
                         { printf("TODO: INTEGER unaryop");
                         };
                    };
-                // printf("reg %d", reg);
                 asmst(MOVL, reg, offs, lhs->stringval);
                 break;
               case REAL:
-                if (rhs->tokentype == IDENTIFIERTOK)
-                   { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
-                     asmfloat(EAX, reg);
-                   };
                 if (rhs->tokentype == OPERATOR)
                    { if (rhs->operands->link) /* binop rhs */
                         { TOKEN rhsrhs = rhs->operands->link;
-                          if (rhs->whichval == FUNCALLOP) /* new */
+                          if (rhs->whichval == FUNCALLOP)
                              { offs = rhsrhs->symentry->offset - stkframesize;
                                asmldr(MOVSD, offs, RBP, reg, rhsrhs->stringval);
                                asmcall(rhs->operands->stringval);
                                asmstr(MOVSD, reg, offs + FLOATSIZE, RBP, lhs->stringval);
+                               break;
+                             };
+                          if (funcallin(rhs->operands)) /* binop rhs lhs is funcall */
+                             { TOKEN rhslhs = rhs->operands;
+                               unused(reg);
+                               reg = genarith(rhslhs);
+                               offs = rhslhs->operands->link->symentry->offset - stkframesize;
+                               // TODO call moveop to find correct MOV for rhslhs?
+                               asmldr(MOVSD, offs, RBP, reg, rhslhs->operands->link->stringval);
+                               asmcall(rhslhs->operands->stringval);
+                               /* assume rhsrhs is a funcall */
+                               asmstr(MOVSD, reg, -FLOATSIZE, RBP, "temp");
+                               unused(reg);
+                             };
+                          if (funcallin(rhsrhs)) /* binop rhs rhs is funcall */
+                             { reg = genarith(rhsrhs);
+                               offs = rhsrhs->operands->link->symentry->offset - stkframesize;
+                               // TODO call moveop to find correct MOV for rhsrhs?
+                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->operands->link->stringval);
+                               asmcall(rhsrhs->operands->stringval);
+                               int reg1 = genarith(rhs);
+                               /* assume rhslhs was a funcall */
+                               // TODO call moveop to find correct MOV for rhs?
+                               asmldr(MOVSD, -FLOATSIZE, RBP, reg1, "temp");
+                               /* finish rhs funcall binop */
+                               asmrr(instmap[rhs->whichval] + SD_OFFSET, reg, reg1);
+                               asmstr(MOVSD, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
                                break;
                              };
                           makeflit(rhsrhs->realval, nextlabel);
@@ -229,6 +262,10 @@ void genc(TOKEN code)
                           asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
                           break;
                         };
+                   }
+                else if (rhs->tokentype == IDENTIFIERTOK)
+                   { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
+                     asmfloat(EAX, reg);
                    };
                 asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
                 break;
@@ -279,7 +316,6 @@ void genc(TOKEN code)
           sym = lhs->symentry;              /* assumes lhs is a simple var  */
           offs = sym->offset - stkframesize; /* net offset of the var   */
           TOKEN statement = expr->link;     /* while loop statement */
-          // call after .L2 genc(statement)
           TOKEN tokgoto;
           int reg1;
           switch ( code->basicdt )
@@ -389,7 +425,10 @@ void restorereg()
 
 /* test if there is a function call within code: 1 if true, else 0 */
 int funcallin(TOKEN code)
-  { /* new? */
+  { if (code->tokentype != OPERATOR) return false;
+    if (code->whichval == FUNCALLOP)
+       { return true;
+       };
     if (code->operands->link && code->operands->link->whichval == FUNCALLOP)
        { return true;
        };
