@@ -175,12 +175,19 @@ void genc(TOKEN code)
               tok = tok->link;
             };
           break;
+
         case ASSIGNOP:
           lhs = code->operands;
           rhs = lhs->link;
           reg = genarith(rhs);              /* generate rhs into a register */
-          sym = lhs->symentry;              /* assumes lhs is a simple var  */
-          offs = sym->offset - stkframesize; /* net offset of the var   */
+          if (lhs->symentry)
+             { sym = lhs->symentry;
+               offs = sym->offset - stkframesize; /* net offset of the var   */
+             }
+          else if (lhs->operands && lhs->operands->symentry)
+             { sym = lhs->operands->symentry;
+               offs = sym->offset - stkframesize;
+             };
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
@@ -231,7 +238,7 @@ void genc(TOKEN code)
                                asmldr(MOVSD, offs, RBP, reg, rhslhs->operands->link->stringval);
                                asmcall(rhslhs->operands->stringval);
                                /* assume rhsrhs is a funcall */
-                               asmstr(MOVSD, reg, -FLOATSIZE, RBP, "temp");
+                               asmsttemp(reg);
                                unused(reg);
                              };
                           if (funcallin(rhsrhs)) /* binop rhs rhs is funcall */
@@ -243,7 +250,7 @@ void genc(TOKEN code)
                                int reg1 = genarith(rhs);
                                /* assume rhslhs was a funcall */
                                // TODO call moveop to find correct MOV for rhs?
-                               asmldr(MOVSD, -FLOATSIZE, RBP, reg1, "temp");
+                               asmldtemp(reg1);
                                /* finish rhs funcall binop */
                                asmrr(instmap[rhs->whichval] + SD_OFFSET, reg, reg1);
                                asmstr(MOVSD, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
@@ -266,6 +273,13 @@ void genc(TOKEN code)
                 else if (rhs->tokentype == IDENTIFIERTOK)
                    { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
                      asmfloat(EAX, reg);
+                   }
+                else if (rhs->tokentype == NUMBERTOK)
+                   { if (lhs->tokentype == OPERATOR && lhs->whichval == AREFOP)
+                        { genaref(code, reg);
+                          asmstrr(MOVSD, reg, offs, RAX, lhs->operands->stringval);
+                          break;
+                        };
                    };
                 asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
                 break;
@@ -282,6 +296,7 @@ void genc(TOKEN code)
                 break;
             };
           break;
+
         case FUNCALLOP:
           lhs = code->operands;
           rhs = lhs->link;
@@ -302,13 +317,16 @@ void genc(TOKEN code)
                 break;
             };
           break;
+
         case GOTOOP:
           /*     ***** fix this *****   */
           break;
+
         case LABELOP:
           asmlabel(code->operands->intval);
           clearreg();
           break;
+
         case IFOP:
           expr = code->operands;
           lhs = expr->operands;
@@ -392,8 +410,7 @@ void used(int reg)
 /* Get a register.   */
 /* Need a type parameter or two versions for INTEGER or REAL */
 int getreg(int kind)
-  {
-    int reg = regkind[kind];
+  { int reg = regkind[kind];
     if (regused[reg])
        { reg++;
        };
@@ -458,6 +475,21 @@ int moveop(TOKEN code)
 /* If storereg < 0, generates a load and returns register number;
    else, generates a store from storereg. */
 int genaref(TOKEN code, int storereg)
-  {
-    return -1;
+  { if (DEBUGGEN)
+       { printf("genaref\n");
+         dbugbprinttok(code);
+         printf("  storereg %d\n", storereg);
+       }
+    if (storereg < 0)
+       { return -1;
+       }
+    TOKEN lhsrhs = code->operands->operands->link;
+    if (lhsrhs->basicdt == INTEGER)
+      { genarith(lhsrhs);
+        asmop(CLTQ);
+      }
+    else if (lhsrhs->basicdt == REAL)
+      { 
+      };
+    return storereg;
   }
