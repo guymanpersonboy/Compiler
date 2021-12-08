@@ -94,7 +94,7 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      asmexit(name->stringval);
   }
 
-/* Trivial version */
+// TODO: replace layered switches with ifs
 /* Generate code for arithmetic expression, return a register number */
 int genarith(TOKEN code)
   { int num, reg = -1;
@@ -188,12 +188,6 @@ void genc(TOKEN code)
              { sym = lhs->operands->symentry;
                offs = sym->offset - stkframesize;
              }
-          // TODO lsh->symentry already exists for test24?
-          // TODO just pust this code where needed?
-          // if (rhs->operands && rhs->operands->symentry)
-          //    { sym = rhs->operands->symentry;
-          //      offs = sym->offset - stkframesize;
-          //    }
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
@@ -286,13 +280,26 @@ void genc(TOKEN code)
                                break;
                              };
                           if (rhs->whichval == AREFOP) /* aref rhs */
-                             { reg = genaref(code, -1);
-                               int reg1 = genarith(lhs);
-                               sym = rhs->operands->symentry;
-                               int offs1 = sym->offset - stkframesize;
-                               // TODO call moveop to find correct MOV?
-                               asmldrr(MOVSD, offs1, reg, reg1, rhs->operands->stringval);
-                               asmst(MOVSD, reg1, offs, lhs->stringval);
+                             { sym = rhs->operands->symentry;
+                               if (sym)
+                                  { reg = genaref(code, -1);
+                                    int reg1 = genarith(lhs);
+                                    int offs1 = sym->offset - stkframesize;
+                                    // TODO call moveop to find correct MOV?
+                                    asmldrr(MOVSD, offs1, reg, reg1, rhs->operands->stringval);
+                                    asmst(MOVSD, reg1, offs, lhs->stringval);
+                                    break;
+                                  };
+                               /* test 28 */
+                               int reg1 = getreg(WORD);
+                               int reg2 = getreg(WORD);
+                               rhs = rhs->operands->operands;
+                               int offs1 = rhs->symentry->offset - stkframesize;
+                               // TODO: call moveop
+                               asmld(MOVQ, offs1, reg1, rhs->stringval);
+                               asmldr(MOVQ, rhs->operands->intval, reg1, reg2, "^.");
+                               asmldr(MOVSD, rhsrhs->intval, reg2, reg, "^.");
+                               asmst(MOVSD, reg, offs, lhs->stringval);
                                break;
                              };
                           makeflit(rhsrhs->realval, nextlabel);
@@ -538,7 +545,7 @@ int genaref(TOKEN code, int storereg)
          return storereg;
        }
     TOKEN lhsrhs = code->operands->operands->link;
-    if (code->operands->operands->tokentype == IDENTIFIERTOK)
+    if (code->operands->operands && code->operands->operands->tokentype == IDENTIFIERTOK)
         // TODO: || code->operands->link->basicdt == INTEGER
        { genarith(lhsrhs);
          asmop(CLTQ);
