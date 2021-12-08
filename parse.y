@@ -293,6 +293,7 @@ TOKEN binop(TOKEN op, TOKEN lhs, TOKEN rhs)        /* reduce binary operator */
        };
     /* type propagation */
     op->basicdt = (lhs->basicdt > rhs->basicdt && lhs->basicdt != 9999) ? lhs->basicdt : rhs->basicdt;
+    op->basicdt = (op->basicdt == 9999 && rhs->basicdt == 9999) ? lhs->basicdt : op->basicdt;
     if (op->whichval == ASSIGNOP && lhs->basicdt == INTEGER && rhs->basicdt == REAL)
        { binop_fix(op, lhs, rhs);
        }

@@ -153,7 +153,7 @@ int genarith(TOKEN code)
     return reg;
   }
 
-
+// TODO replace all literal RBP with asmld/asmst ?
 /* Generate code for a Statement from an intermediate-code form */
 void genc(TOKEN code)
   { TOKEN tok, lhs, rhs, expr;
@@ -187,7 +187,13 @@ void genc(TOKEN code)
           else if (lhs->operands && lhs->operands->symentry)
              { sym = lhs->operands->symentry;
                offs = sym->offset - stkframesize;
-             };
+             }
+          // TODO lsh->symentry already exists for test24?
+          // TODO just pust this code where needed?
+          // if (rhs->operands && rhs->operands->symentry)
+          //    { sym = rhs->operands->symentry;
+          //      offs = sym->offset - stkframesize;
+          //    }
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
@@ -202,6 +208,19 @@ void genc(TOKEN code)
                                break;
                              };
                           reg1 = (reg == reg1) ? reg+1 : reg1;
+                          if (rhs->whichval == AREFOP)
+                             { sym = rhs->operands->operands->symentry;
+                               int offs1 = sym->offset - stkframesize;
+                               // TODO: call moveop on john is a pointer
+                               asmld(MOVQ, offs1, reg, sym->namestring);
+                               // TODO maybe bring outside of else-if along with the lhs version
+                               if (rhs->whichval == AREFOP && rhs->operands && rhs->operands->whichval == POINTEROP)
+                                  { strncpy(rhs->operands->stringval, "^.", 16);
+                                  };
+                               asmldr(MOVL, rhs->operands->link->intval, reg, reg1, rhs->operands->stringval);
+                               asmst(MOVL, reg1, offs, lhs->stringval);
+                               break;
+                             };
                           asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
                           if (rhsrhs->tokentype == NUMBERTOK)
                             { asmimmed(MOVL, rhsrhs->intval, reg1);
@@ -215,7 +234,21 @@ void genc(TOKEN code)
                      else /* unaryop */
                         { printf("TODO: INTEGER unaryop");
                         };
-                   };
+                   }
+                else if (lhs->whichval == AREFOP && rhs->tokentype == NUMBERTOK)
+                   { int reg1 = getreg(WORD);
+                     offs = lhs->operands->link->intval;
+                     sym = lhs->operands->operands->symentry;
+                     int offs1 = sym->offset - stkframesize;
+                     // TODO call moveop on test25 john is pointer uses movq
+                     asmld(MOVQ, offs1, reg1, sym->namestring);
+                     // TODO maybe bring outside of else-if
+                     if (lhs->whichval == AREFOP && lhs->operands && lhs->operands->whichval == POINTEROP)
+                        { strncpy(lhs->operands->stringval, "^.", 16);
+                        };
+                     asmstr(MOVL, reg, offs, reg1, lhs->operands->stringval);
+                     break;
+                   }
                 asmst(MOVL, reg, offs, lhs->stringval);
                 break;
               case REAL:
@@ -256,6 +289,16 @@ void genc(TOKEN code)
                                asmstr(MOVSD, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
                                break;
                              };
+                          if (rhs->whichval == AREFOP) /* aref rhs */
+                             { reg = genaref(code, -1);
+                               int reg1 = genarith(lhs);
+                               sym = rhs->operands->symentry;
+                               int offs1 = sym->offset - stkframesize;
+                               // TODO call moveop to find correct MOV?
+                               asmldrr(MOVSD, offs1, reg, reg1, rhs->operands->stringval);
+                               asmst(MOVSD, reg1, offs, lhs->stringval);
+                               break;
+                             };
                           makeflit(rhsrhs->realval, nextlabel);
                           asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
                           int reg1 = getreg(FLOAT);
@@ -276,7 +319,12 @@ void genc(TOKEN code)
                    }
                 else if (rhs->tokentype == NUMBERTOK)
                    { if (lhs->tokentype == OPERATOR && lhs->whichval == AREFOP)
-                        { genaref(code, reg);
+                        { if (genaref(code, reg) == -1) /* rhs is a REAL */
+                             { offs = lhs->operands->operands->symentry->offset - stkframesize;
+                               asmld(MOVQ, offs, getreg(RAX), lhs->operands->operands->symentry->namestring);
+                               
+                               break;
+                             };
                           asmstrr(MOVSD, reg, offs, RAX, lhs->operands->stringval);
                           break;
                         };
@@ -481,15 +529,19 @@ int genaref(TOKEN code, int storereg)
          printf("  storereg %d\n", storereg);
        }
     if (storereg < 0)
-       { return -1;
+       { TOKEN rhsrhs = code->operands->link->operands->link;
+         storereg = genarith(rhsrhs);
+         asmop(CLTQ);
+         return storereg;
        }
     TOKEN lhsrhs = code->operands->operands->link;
-    if (lhsrhs->basicdt == INTEGER)
-      { genarith(lhsrhs);
-        asmop(CLTQ);
-      }
-    else if (lhsrhs->basicdt == REAL)
-      { 
+    if (// TODO: code->operands->link->basicdt == INTEGER
+        || code->operands->operands->tokentype == IDENTIFIERTOK)
+       { genarith(lhsrhs);
+         asmop(CLTQ);
+       }
+    else
+      { return -1;
       };
     return storereg;
   }
