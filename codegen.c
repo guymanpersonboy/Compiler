@@ -47,10 +47,11 @@ void genc(TOKEN code);
 int nextlabel;    /* Next available label number */
 int stkframesize;   /* total stack frame size */
 
-static bool regused[FMAX + 1];   /* registers in use */
+static bool regused[FMAX + 1];  /* registers in use */
 static int regkind[RDI + 1];    /* in: kind of data. out: reg */
-static int instmap[NOTOP + 1];   /* in: op number. out: op code inst */
-static int jumpmap[GTOP + 1];    /* in: op number. out: op code jump */
+static int instmap[NOTOP + 1];  /* in: op number. out: op code inst */
+static int jumpmap[GTOP + 1];   /* in: op number. out: op code jump */
+static int movemap[POINTER + 1];   /* for use in moveop() */
 
 /* Top-level entry for code generator.
    pcode    = pointer to code:  (program foo (output) (progn ...))
@@ -90,6 +91,10 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      jumpmap[LEOP] = JLE;
      jumpmap[GEOP] = JGE;
      jumpmap[GTOP] = JG;
+
+     movemap[INTEGER] = MOVL;
+     movemap[REAL] = MOVQ;
+     movemap[POINTER] = MOVSD;
      genc(code);
      asmexit(name->stringval);
   }
@@ -237,6 +242,7 @@ void genc(TOKEN code)
                         { strncpy(lhs->operands->stringval, "^.", 16);
                         };
                      asmstr(MOVL, reg, offs, reg1, lhs->operands->stringval);
+                     clearreg();
                      break;
                    }
                 asmst(MOVL, reg, offs, lhs->stringval);
@@ -524,8 +530,7 @@ int genfun(TOKEN code)
 
 /* find the correct MOV op depending on type of code */
 int moveop(TOKEN code)
-  {
-    return -1;
+  { return movemap[code->basicdt];
   }
 
 /* Generate code for array references and pointers */
