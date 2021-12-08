@@ -914,6 +914,7 @@ TOKEN reducedot(TOKEN var, TOKEN dot, TOKEN field)
               if (result != -1)
                  { offset = sym->offset + result;
                     TOKEN tokoff = fillintc(field, offset);
+                    varid->operands->operands->operands = makeintc(result);
                     TOKEN tokresult = makearef(varid, tokoff, dot);
                     if (sym->datatype->kind == RECORDSYM)
                        { varid->basicdt = sym->datatype->datatype->datatype->basicdt;

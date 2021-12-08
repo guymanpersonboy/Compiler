@@ -213,11 +213,7 @@ void genc(TOKEN code)
                                int offs1 = sym->offset - stkframesize;
                                // TODO: call moveop on john is a pointer
                                asmld(MOVQ, offs1, reg, sym->namestring);
-                               // TODO maybe bring outside of else-if along with the lhs version
-                               if (rhs->whichval == AREFOP && rhs->operands && rhs->operands->whichval == POINTEROP)
-                                  { strncpy(rhs->operands->stringval, "^.", 16);
-                                  };
-                               asmldr(MOVL, rhs->operands->link->intval, reg, reg1, rhs->operands->stringval);
+                               asmldr(MOVL, rhs->operands->link->intval, reg, reg1, "^.");
                                asmst(MOVL, reg1, offs, lhs->stringval);
                                break;
                              };
@@ -319,10 +315,17 @@ void genc(TOKEN code)
                    }
                 else if (rhs->tokentype == NUMBERTOK)
                    { if (lhs->tokentype == OPERATOR && lhs->whichval == AREFOP)
-                        { if (genaref(code, reg) == -1) /* rhs is a REAL */
-                             { offs = lhs->operands->operands->symentry->offset - stkframesize;
-                               asmld(MOVQ, offs, getreg(RAX), lhs->operands->operands->symentry->namestring);
-                               
+                        { reg = genaref(code, reg);
+                          if (code->operands->operands->tokentype != IDENTIFIERTOK)
+                             { rhs = lhs->operands->operands;
+                               offs = rhs->symentry->offset - stkframesize;
+                               int reg1 = getreg(WORD);
+                               asmld(MOVQ, offs, reg1, rhs->stringval);
+                               /* secret NUMBERTOK */
+                               int offs1 = rhs->operands->intval;
+                               int reg2 = getreg(WORD);
+                               asmldr(MOVQ, offs1, reg1, reg2, "^.");
+                               asmstr(MOVSD, reg, lhs->operands->link->intval, reg2, "^.");
                                break;
                              };
                           asmstrr(MOVSD, reg, offs, RAX, lhs->operands->stringval);
@@ -535,13 +538,10 @@ int genaref(TOKEN code, int storereg)
          return storereg;
        }
     TOKEN lhsrhs = code->operands->operands->link;
-    if (// TODO: code->operands->link->basicdt == INTEGER
-        || code->operands->operands->tokentype == IDENTIFIERTOK)
+    if (code->operands->operands->tokentype == IDENTIFIERTOK)
+        // TODO: || code->operands->link->basicdt == INTEGER
        { genarith(lhsrhs);
          asmop(CLTQ);
        }
-    else
-      { return -1;
-      };
     return storereg;
   }
