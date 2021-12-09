@@ -99,10 +99,10 @@ void gencode(TOKEN pcode, int varsize, int maxlabel)
      asmexit(name->stringval);
   }
 
-// TODO: replace layered switches with ifs
 /* Generate code for arithmetic expression, return a register number */
 int genarith(TOKEN code)
   { int num, reg = -1;
+    int dt = code->basicdt;
     if (DEBUGGEN)
        { printf("genarith\n");
 	       dbugprinttok(code);
@@ -111,54 +111,45 @@ int genarith(TOKEN code)
        };
     switch ( code->tokentype )
       { case NUMBERTOK:
-          switch (code->basicdt)
-            { case INTEGER:
-                num = code->intval;
-                reg = getreg(WORD);
-                if ( num >= MINIMMEDIATE && num <= MAXIMMEDIATE )
+          if (dt == INTEGER)
+             { num = code->intval;
+               reg = getreg(WORD);
+               if ( num >= MINIMMEDIATE && num <= MAXIMMEDIATE )
                   asmimmed(MOVL, num, reg);
-                break;
-              case REAL:
-                reg = getreg(FLOAT);
-                makeflit(code->realval, nextlabel);
-                asmldflit(MOVSD, nextlabel++, reg);
-                break;
-            }
+             };
+          if (dt == REAL)
+             { reg = getreg(FLOAT);
+               makeflit(code->realval, nextlabel);
+               asmldflit(MOVSD, nextlabel++, reg);
+             };
           break;
         case IDENTIFIERTOK:
-          switch (code->basicdt)
-            { case REAL:
-                reg = getreg(FLOAT);
-                break;
-              case POINTER:
-                reg = getreg(ADDR);
-                break;
-            }
+          if (dt == REAL)
+             reg = getreg(FLOAT);
+          if (dt == POINTER)
+             reg = getreg(ADDR);
           break;
         case OPERATOR:
-          switch (code->basicdt)
-            { case INTEGER:
-                reg = getreg(WORD);
-                if (code->whichval == FUNCALLOP)
-                   { if (strncmp(code->operands->stringval, "new", 16) == 0)
-                     { asmimmed(MOVL, code->operands->link->intval, reg);
-                     }
-                     else if (strncmp(code->operands->stringval, "iround", 16) == 0)
-                     { unused(reg);
-                       reg = getreg(FLOAT);
-                     };
-                   };
-                break;
-              case REAL:
-                reg = getreg(FLOAT);
-                break;
-            }
+          if (dt == INTEGER)
+             { reg = getreg(WORD);
+               if (code->whichval == FUNCALLOP)
+                  { if (strncmp(code->operands->stringval, "new", 16) == 0)
+                       { asmimmed(MOVL, code->operands->link->intval, reg);
+                         break;
+                       };
+                    if (strncmp(code->operands->stringval, "iround", 16) == 0)
+                       { unused(reg);
+                         reg = getreg(FLOAT);
+                       };
+                  };
+             };
+          if (dt == REAL)
+             reg = getreg(FLOAT);
           break;
       };
     return reg;
   }
 
-// TODO replace all literal RBP with asmld/asmst ?
 /* Generate code for a Statement from an intermediate-code form */
 void genc(TOKEN code)
   { TOKEN tok, lhs, rhs, expr;
@@ -192,7 +183,7 @@ void genc(TOKEN code)
           else if (lhs->operands && lhs->operands->symentry)
              { sym = lhs->operands->symentry;
                offs = sym->offset - stkframesize;
-             }
+             };
           switch (code->basicdt)            /* store value into lhs  */
             { case INTEGER:
                 if (rhs->tokentype == OPERATOR)
@@ -200,10 +191,10 @@ void genc(TOKEN code)
                         { TOKEN rhsrhs = rhs->operands->link;
                           int reg1 = getreg(WORD);
                           if (rhs->whichval == FUNCALLOP)
-                             { offs = rhsrhs->symentry->offset - stkframesize;
-                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->stringval);
+                             { int offs1 = rhsrhs->symentry->offset - stkframesize;
+                               asmld(MOVSD, offs1, reg, rhsrhs->stringval);
                                asmcall(rhs->operands->stringval);
-                               asmstr(MOVL, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
+                               asmst(MOVL, reg1, offs, lhs->stringval);
                                break;
                              };
                           reg1 = (reg == reg1) ? reg+1 : reg1;
@@ -216,12 +207,12 @@ void genc(TOKEN code)
                                asmst(MOVL, reg1, offs, lhs->stringval);
                                break;
                              };
-                          asmldr(MOVL, offs, RBP, reg, rhs->operands->stringval);
+                          asmld(MOVL, offs, reg, rhs->operands->stringval);
                           if (rhsrhs->tokentype == NUMBERTOK)
                             { asmimmed(MOVL, rhsrhs->intval, reg1);
                             }
                           else /* IDENTIFIERTOK */
-                            { asmldr(MOVL, offs + WORDSIZE, RBP, reg1, rhsrhs->stringval);
+                            { asmld(MOVL, offs + WORDSIZE, reg1, rhsrhs->stringval);
                             };
                           /* op code instructions */
                           asmrr(instmap[rhs->whichval], reg1, reg);
@@ -242,7 +233,6 @@ void genc(TOKEN code)
                         { strncpy(lhs->operands->stringval, "^.", 16);
                         };
                      asmstr(MOVL, reg, offs, reg1, lhs->operands->stringval);
-                     clearreg();
                      break;
                    }
                 asmst(MOVL, reg, offs, lhs->stringval);
@@ -252,10 +242,10 @@ void genc(TOKEN code)
                    { if (rhs->operands->link) /* binop rhs */
                         { TOKEN rhsrhs = rhs->operands->link;
                           if (rhs->whichval == FUNCALLOP)
-                             { offs = rhsrhs->symentry->offset - stkframesize;
-                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->stringval);
+                             { int offs1 = rhsrhs->symentry->offset - stkframesize;
+                               asmld(MOVSD, offs1, reg, rhsrhs->stringval);
                                asmcall(rhs->operands->stringval);
-                               asmstr(MOVSD, reg, offs + FLOATSIZE, RBP, lhs->stringval);
+                               asmst(MOVSD, reg, offs, lhs->stringval);
                                break;
                              };
                           if (funcallin(rhs->operands)) /* binop rhs lhs is funcall */
@@ -264,7 +254,7 @@ void genc(TOKEN code)
                                reg = genarith(rhslhs);
                                offs = rhslhs->operands->link->symentry->offset - stkframesize;
                                // TODO call moveop to find correct MOV for rhslhs?
-                               asmldr(MOVSD, offs, RBP, reg, rhslhs->operands->link->stringval);
+                               asmld(MOVSD, offs, reg, rhslhs->operands->link->stringval);
                                asmcall(rhslhs->operands->stringval);
                                /* assume rhsrhs is a funcall */
                                asmsttemp(reg);
@@ -274,15 +264,16 @@ void genc(TOKEN code)
                              { reg = genarith(rhsrhs);
                                offs = rhsrhs->operands->link->symentry->offset - stkframesize;
                                // TODO call moveop to find correct MOV for rhsrhs?
-                               asmldr(MOVSD, offs, RBP, reg, rhsrhs->operands->link->stringval);
+                               asmld(MOVSD, offs, reg, rhsrhs->operands->link->stringval);
                                asmcall(rhsrhs->operands->stringval);
                                int reg1 = genarith(rhs);
                                /* assume rhslhs was a funcall */
-                               // TODO call moveop to find correct MOV for rhs?
                                asmldtemp(reg1);
                                /* finish rhs funcall binop */
                                asmrr(instmap[rhs->whichval] + SD_OFFSET, reg, reg1);
-                               asmstr(MOVSD, reg1, offs + FLOATSIZE, RBP, lhs->stringval);
+                               offs = sym->offset - stkframesize;
+                               // TODO call moveop to find correct MOV for rhs?
+                               asmst(MOVSD, reg1, offs, lhs->stringval);
                                break;
                              };
                           if (rhs->whichval == AREFOP) /* aref rhs */
@@ -309,21 +300,23 @@ void genc(TOKEN code)
                                break;
                              };
                           makeflit(rhsrhs->realval, nextlabel);
-                          asmldr(MOVSD, offs, RBP, reg, rhs->operands->stringval);
+                          asmld(MOVSD, offs, reg, rhs->operands->stringval);
                           int reg1 = getreg(FLOAT);
                           asmldflit(MOVSD, nextlabel++, reg1);
                           asmrr(instmap[rhs->whichval] + SD_OFFSET, reg1, reg);
                         }
                      else /* unaryop */
-                        { asmldr(MOVSD, offs + FLOATSIZE, RBP, reg, rhs->operands->stringval);
+                        { int offs1 = rhs->operands->symentry->offset - stkframesize;
+                          asmld(MOVSD, offs1, reg, rhs->operands->stringval);
                           int reg1 = getreg(FLOAT);
                           asmfneg(reg, reg1);
-                          asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
+                          asmst(MOVSD, reg, offs, lhs->stringval);
                           break;
                         };
                    }
                 else if (rhs->tokentype == IDENTIFIERTOK)
-                   { asmldr(MOVL, offs + FLOATSIZE, RBP, EAX, rhs->symentry->namestring);
+                   { int offs1 = rhs->symentry->offset - stkframesize;
+                     asmld(MOVL, offs1, EAX, rhs->symentry->namestring);
                      asmfloat(EAX, reg);
                    }
                 else if (rhs->tokentype == NUMBERTOK)
@@ -345,18 +338,18 @@ void genc(TOKEN code)
                           break;
                         };
                    };
-                asmstr(MOVSD, reg, offs, RBP, lhs->stringval);
+                asmst(MOVSD, reg, offs, lhs->stringval);
                 break;
               case POINTER:
                 if (funcallin(code))
                    { asmrr(MOVL, reg, getreg(RDI));
                      asmcall(rhs->operands->stringval);
-                     asmstr(MOVQ, reg, offs, RBP, sym->namestring);
+                     asmst(MOVQ, reg, offs, sym->namestring);
                      break;
                    };
-                // TODO offs + FLOATSIZE?
-                asmldr(MOVQ, offs + FLOATSIZE, RBP, reg, rhs->stringval);
-                asmstr(MOVQ, reg, offs, RBP, lhs->stringval);
+                int offs1 = rhs->symentry->offset - stkframesize;
+                asmld(MOVQ, offs1, reg, rhs->stringval);
+                asmst(MOVQ, reg, offs, lhs->stringval);
                 break;
             };
           break;
@@ -370,7 +363,7 @@ void genc(TOKEN code)
                 reg = getreg(WORD);
                 regd = getreg(RDI);
                 offs = rhs->symentry->offset - stkframesize; /* net offset of the var   */
-                asmldr(MOVL, offs, RBP, reg, rhs->stringval);
+                asmld(MOVL, offs, reg, rhs->stringval);
                 asmrr(MOVL, reg, regd);
                 asmcall(lhs->stringval);
                 break;
@@ -383,12 +376,12 @@ void genc(TOKEN code)
           break;
 
         case GOTOOP:
-          /*     ***** fix this *****   */
+          asmjump(JMP, code->operands->intval);
+          asmlabel(nextlabel);
           break;
 
         case LABELOP:
           asmlabel(code->operands->intval);
-          clearreg();
           break;
 
         case IFOP:
@@ -398,21 +391,19 @@ void genc(TOKEN code)
           sym = lhs->symentry;              /* assumes lhs is a simple var  */
           offs = sym->offset - stkframesize; /* net offset of the var   */
           TOKEN statement = expr->link;     /* while loop statement */
-          TOKEN tokgoto;
           int reg1;
           switch ( code->basicdt )
             { case BOOLETYPE: /* either for-loop or repeat statement */
                 /* for loop if section */
                 reg = getreg(WORD);
                 reg1 = getreg(WORD);
-                bool same = reg == reg1;
-                reg1 = (same) ? reg+1 : reg1;
-                asmldr(MOVL, offs, RBP, reg, lhs->stringval);
+                asmld(MOVL, offs, reg, lhs->stringval);
                 asmimmed(MOVL, rhs->intval, reg1);
                 asmrr(CMPL, reg1, reg);
                 asmjump(jumpmap[expr->whichval], nextlabel++);
-                if (same) /* repeat statement */
-                   { asmjump(JMP, code->operands->link->link->operands->intval);
+                TOKEN tokrep = expr->link->link;
+                if (tokrep && tokrep->operands) /* repeat statement */
+                   { asmjump(JMP, tokrep->operands->intval);
                      asmjump(JMP, nextlabel);
                      /* end repeat */
                      asmlabel(nextlabel - 1);
@@ -420,13 +411,9 @@ void genc(TOKEN code)
                      break;
                    }
                 asmjump(JMP, nextlabel);
-                /* statement section */
-                tokgoto = statement->operands->link->link;
+                /* statement and goto section */
                 asmlabel(nextlabel - 1);
                 genc(statement);
-                asmjump(JMP, tokgoto->operands->intval);
-                /* endfor */
-                asmlabel(nextlabel);
                 break;
               case INTEGER: /* while-loop not set as BOOLETYPE */
               case REAL:    /* assumes while-loop always uses MOVQ */
@@ -434,22 +421,20 @@ void genc(TOKEN code)
                 /* while-loop if section */
                 reg = genarith(statement->operands->operands->link); /* generate statement rhs into a register */
                 reg1 = getreg(WORD); /* assumes the statement deals with INTEGER only */
-                asmldr(MOVQ, offs, RBP, reg, expr->operands->stringval);
+                asmld(MOVQ, offs, reg, expr->operands->stringval);
                 asmimmed(MOVQ, rhs->intval, reg1);
                 asmrr(CMPQ, reg1, reg);
                 asmjump(jumpmap[expr->whichval], nextlabel++);
                 asmjump(JMP, nextlabel);
-                /* statement section */
-                tokgoto = statement->operands->link;
+                /* statement and goto section */
                 asmlabel(nextlabel - 1);
                 genc(statement);
-                asmjump(JMP, tokgoto->operands->intval);
-                /* endwhile */
-                asmlabel(nextlabel);
                 break;
             };
           break;
 	    };
+
+    clearreg();
   }
 
 /* Clear register used tables to mark all registers free.  */
@@ -481,7 +466,7 @@ int getreg(int kind)
     if (regused[reg])
        { reg--;
        };
-    used(reg);
+    regused[reg] = true;
     return reg;
   }
 
@@ -542,18 +527,17 @@ int genaref(TOKEN code, int storereg)
        { printf("genaref\n");
          dbugbprinttok(code);
          printf("  storereg %d\n", storereg);
-       }
+       };
     if (storereg < 0)
        { TOKEN rhsrhs = code->operands->link->operands->link;
          storereg = genarith(rhsrhs);
          asmop(CLTQ);
          return storereg;
-       }
+       };
     TOKEN lhsrhs = code->operands->operands->link;
     if (code->operands->operands && code->operands->operands->tokentype == IDENTIFIERTOK)
-        // TODO: || code->operands->link->basicdt == INTEGER
        { genarith(lhsrhs);
          asmop(CLTQ);
-       }
+       };
     return storereg;
   }
